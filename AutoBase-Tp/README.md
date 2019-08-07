@@ -3,4 +3,4 @@ A plugin that features automatic bed spawn teleportation on join. There are no i
 
 Permissions: **join2base.admin.toggle**
 
-Command to turning on or off: **join2base**
+Command to turning on or off: **/join2base**
