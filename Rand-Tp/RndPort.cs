@@ -9,11 +9,10 @@ using TerrariaApi.Server;
 
 namespace rnd_tp
 {
+    [ApiVersion(2, 1)]
     public class Plugin : TerrariaPlugin
     {
-        private bool enabled = false;
-        private int who = 255;
-        private bool activated;
+        private bool enabled = true;
         private List<Vector2> position = new List<Vector2>();
         public override string Name
         {
@@ -29,7 +28,7 @@ namespace rnd_tp
         }
         public override string Description
         {
-            get { return "Adds chat command that enables a player to teleport anywhere on the given overworld (optional: for a certain price)"; }
+            get { return "Adds chat command that enables a player to teleport anywhere on the given overworld"; }
         }
         public override void Initialize()
         {
@@ -52,39 +51,31 @@ namespace rnd_tp
         }
         public void OnInit(EventArgs e)
         {
-            Commands.ChatCommands.Add(new Command("randport.admin.toggle", RandOption, "random")
+            Commands.ChatCommands.Add(new Command("randport.admin.toggle", RandOption, "randport")
             {
                 HelpText = "Permits players to teleport to a random location on the overworld"
             });
-            int spawnY = Main.spawnTileY - 100;
-            for (int i = 100; i < Main.maxTilesY; i++)
-            for (int j = spawnY; j < spawnY + 200; j++)
-            {
-                if (Main.tile[i, j].wall == Terraria.ID.WallID.None && Main.tile[i, j + 1].active() && Main.tileSolid[Main.tile[i, j+ 1].type])
-                {
-                    position.Add(new Vector2(i * 16, j * 16));
-                }
-            }
         }
         public void OnChat(ServerChatEventArgs e)
         {
-            if (e.Text.StartsWith("/random") && !activated)
+            if (enabled && e.Text.StartsWith("/random"))
             {
-                activated = true;
-                who = e.Who;
+                position.Clear();
+                int spawnY = Main.spawnTileY - 100;
+                for (int i = 100; i < Main.maxTilesY; i++)
+                for (int j = spawnY; j < spawnY + 200; j++)
+                {
+                    if (Main.tile[i, j].wall == Terraria.ID.WallID.None && Main.tile[i, j + 1].active() && Main.tileSolid[Main.tile[i, j+ 1].type])
+                    {
+                        position.Add(new Vector2(i * 16, j * 16));
+                    }
+                }
+                Vector2 moveTo = position[Main.rand.Next(position.Count - 1)];
+                TShock.Players[e.Who].Teleport(moveTo.X, moveTo.Y);
             }
         }
         public void OnGetData(GetDataEventArgs e)
         {
-            if (!enabled || !activated)
-                return;
-            if (!e.Handled)
-            {
-                Vector2 moveTo = position[Main.rand.Next(position.Count - 1)];
-                TShock.Players[who].Teleport(moveTo.X, moveTo.Y);
-                activated = false;
-                who = 255;
-            }
         }
         private void RandOption(CommandArgs e)
         {
