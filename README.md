@@ -10,5 +10,4 @@ Given, there's a requirement for each plugin to compile successfully, and that i
 
 Include OTAPI.dll, TerrariaServer.exe, and TShockAPI.dll in the same folder as the plugin .cs and compile.cmd files.
 
-### Walkthrough
 A more thorough process of this can be found at the WIki.
