@@ -20,6 +20,7 @@ namespace safehouse
         private int who = 255;
         private List<SHPlayer> shp = new List<SHPlayer>();
         private int oldCount, regionCount;
+        private int limit;
         public override string Name
         {
             get { return "Safe Houses"; }
@@ -46,6 +47,7 @@ namespace safehouse
             ServerApi.Hooks.NetGetData.Register(this, OnGetData);
             ServerApi.Hooks.ServerJoin.Register(this, OnJoin);
             ServerApi.Hooks.ServerLeave.Register(this, OnLeave);
+            ServerApi.Hooks.GameUpdate.Register(this, SafeHouse);
         }
         protected override void Dispose(bool disposing)
         {
@@ -55,6 +57,7 @@ namespace safehouse
                 ServerApi.Hooks.NetGetData.Deregister(this, OnGetData);
                 ServerApi.Hooks.ServerJoin.Deregister(this, OnJoin);
                 ServerApi.Hooks.ServerLeave.Deregister(this, OnLeave);
+                ServerApi.Hooks.GameUpdate.Deregister(this, SafeHouse);
             }
             base.Dispose(disposing);
         }
@@ -76,7 +79,7 @@ namespace safehouse
                 }
             }
         }
-        private void SafeHouse()
+        private void SafeHouse(EventArgs e)
         {
             if (oldCount != shp.Count)
             {
@@ -97,7 +100,7 @@ namespace safehouse
                     if (p == null)
                         continue;
                     Player player = Main.player[p.who];
-                    if (player.statLife < player.statLifeMax)
+                    if (player.statLife != p.oldLife)
                     {
                         if (r.Contains(player.position.X, player.position.Y))
                         {
@@ -109,6 +112,7 @@ namespace safehouse
                                 continue;
                             }
                         }
+                        p.oldLife = player.statLife;
                     }
                     else p.healed = false;
                 }
@@ -142,11 +146,9 @@ namespace safehouse
         {
             if (!e.Handled)
             {
-                if (e.MsgID != PacketTypes.Tile && e.MsgID != PacketTypes.PlayerHurtV2)
-                    return;
-                using (BinaryReader br = new BinaryReader(new MemoryStream(e.Msg.readBuffer, e.Index, e.Length)))
+                if (e.MsgID == PacketTypes.Tile)
                 {
-                    if (e.MsgID == PacketTypes.Tile)
+                    using (BinaryReader br = new BinaryReader(new MemoryStream(e.Msg.readBuffer, e.Index, e.Length)))
                     {
                         byte action = br.ReadByte();
                         short x = br.ReadInt16();
@@ -166,10 +168,6 @@ namespace safehouse
                             TShock.Players[who].SendInfoMessage("Point 2 set.");
                             who = 0;
                         }
-                    }
-                    if (e.MsgID == PacketTypes.PlayerHurtV2)
-                    {  
-                        SafeHouse();
                     }
                 }
             }
@@ -290,6 +288,7 @@ namespace safehouse
     {
         public int who;
         public bool healed;
+        public int oldLife;
         public TSPlayer tsp
         {
             get { return TShock.Players[who]; }
