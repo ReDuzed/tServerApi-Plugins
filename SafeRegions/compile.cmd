@@ -1,0 +1,2 @@
+C:\Windows\Microsoft.NET\Framework\v4.0.30319\csc.exe /out:.\bin\Release\SafeHouse.dll /target:library /recurse:Plugin.cs /recurse:AssemblyInfo.cs /reference:OTAPI.dll,TShockAPI.dll,TerrariaServer.exe
+timeout 10
