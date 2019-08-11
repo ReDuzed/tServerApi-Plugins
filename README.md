@@ -9,3 +9,6 @@ Within each plugin root folder is a little .cmd file that, when run alongside th
 Given, there's a requirement for each plugin to compile successfully, and that is the tShock plugin libraries. This is included in every tShock .zip file: 
 
 Include OTAPI.dll, TerrariaServer.exe, and TShockAPI.dll in the same folder as the plugin .cs and compile.cmd files.
+
+### Walkthrough
+A more thorough process of this can be found at the WIki.
