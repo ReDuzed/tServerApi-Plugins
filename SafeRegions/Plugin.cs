@@ -6,6 +6,7 @@ using Terraria.Localization;
 using TShockAPI;
 using TShockAPI.Hooks;
 using TerrariaApi.Server;
+using RUDD;
 
 namespace safehouse
 {
@@ -21,9 +22,11 @@ namespace safehouse
         private List<SHPlayer> shp = new List<SHPlayer>();
         private int oldCount, regionCount;
         private int limit;
+        private Command remove = null;
+        private Command regions = null;
         public override string Name
         {
-            get { return "Safe Houses"; }
+            get { return "Safe Regions"; }
         }
         public override Version Version
         {
@@ -47,7 +50,7 @@ namespace safehouse
             ServerApi.Hooks.NetGetData.Register(this, OnGetData);
             ServerApi.Hooks.ServerJoin.Register(this, OnJoin);
             ServerApi.Hooks.ServerLeave.Register(this, OnLeave);
-            ServerApi.Hooks.GameUpdate.Register(this, SafeHouse);
+            ServerApi.Hooks.GameUpdate.Register(this, SafeRegion);
         }
         protected override void Dispose(bool disposing)
         {
@@ -57,7 +60,7 @@ namespace safehouse
                 ServerApi.Hooks.NetGetData.Deregister(this, OnGetData);
                 ServerApi.Hooks.ServerJoin.Deregister(this, OnJoin);
                 ServerApi.Hooks.ServerLeave.Deregister(this, OnLeave);
-                ServerApi.Hooks.GameUpdate.Deregister(this, SafeHouse);
+                ServerApi.Hooks.GameUpdate.Deregister(this, SafeRegion);
             }
             base.Dispose(disposing);
         }
@@ -79,7 +82,7 @@ namespace safehouse
                 }
             }
         }
-        private void SafeHouse(EventArgs e)
+        private void SafeRegion(EventArgs e)
         {
             if (oldCount != shp.Count)
             {
@@ -106,13 +109,14 @@ namespace safehouse
                         {
                             if (!p.healed)
                             {
-                                p.tsp.Heal();
+                                var tsp = TShock.Players[p.who];
+                                tsp.Heal();
                                 p.healed = true;
-                                p.tsp.SendData(PacketTypes.PlayerHp, "", p.who);
+                                tsp.SendData(PacketTypes.PlayerHp, "", p.who);
                                 continue;
                             }
+                            p.oldLife = player.statLife;
                         }
-                        p.oldLife = player.statLife;
                     }
                     else p.healed = false;
                 }
@@ -121,25 +125,15 @@ namespace safehouse
         }
         private void OnCommand(CommandEventArgs e)
         {
-            Commands.ChatCommands.Add(new Command("safehouse.admin.regions", ShRemove, "shremove")
+            if (!Commands.ChatCommands.Contains(remove))
+            Commands.ChatCommands.Add(remove = new Command("safehouse.admin.remove", ShRemove, "shremove")
             {
                 HelpText = "Causes removal of safe region by name or index"
             });
-            Commands.ChatCommands.Add(new Command("safehouse.admin.regions", SetRegion, new string[] { "shset1", "shset2" }) 
+            if (!Commands.ChatCommands.Contains(regions))
+            Commands.ChatCommands.Add(regions = new Command("safehouse.admin.regions", SafeRegion, new string[] { "shset1", "shset2", "shmake", "shreset", "shlist" }) 
             {
-                HelpText = "Set1 sets up the upper left point while set2 sets the lower right point"
-            });
-            Commands.ChatCommands.Add(new Command("safehouse.admin.regions", MakeRegion, "shmake") 
-            {
-                HelpText = "After region points are set, this makes the zone and removes the temporary points"
-            });
-            Commands.ChatCommands.Add(new Command("safehouse.admin.regions", Reset, "shreset") 
-            {
-                HelpText = "Removes the points that are being used for designating a region"
-            });
-            Commands.ChatCommands.Add(new Command("safehouse.admin.regions", List, "shlist") 
-            {
-                HelpText = "Lists all the made safe regions"
+                HelpText = Name + ": Modifies the safe region parameters"
             });
         }
         private void OnGetData(GetDataEventArgs e)
@@ -195,103 +189,61 @@ namespace safehouse
                 }
             }
         }
-        private void SetRegion(CommandArgs e)
+        private void SafeRegion(CommandArgs e)
         {
-            if (e.Message.Contains("set1") && !e.Message.Contains("2"))
+            string command = e.Message.Contains(" ") ? e.Message.Substring(0, e.Message.IndexOf(" ")) : e.Message;
+            switch (command)
             {
-                e.Player.SendInfoMessage("Mine at a tile to set the first corner" + (await2 ? " (reset set2)" : "."));
-                if (await2)
-                    await2 = false;
-                await1 = true;
-                who = e.Player.Index;
-                return;
+                case "shset1":
+                    if (e.Message.Contains("set1") && !e.Message.Contains("2"))
+                    {
+                        e.Player.SendInfoMessage("Mine at a tile to set the first corner" + (await2 ? " (reset set2)" : "."));
+                        if (await2)
+                            await2 = false;
+                        await1 = true;
+                        who = e.Player.Index;
+                        return;
+                    }
+                    break;
+                case "shset2":
+                    if (e.Message.Contains("set2") && !e.Message.Contains("1"))
+                    {
+                        e.Player.SendInfoMessage("Mine at a tile to set the second corner" + (await1 ? " (reset set1)" : "."));
+                        if (await1)
+                            await1 = false;
+                        await2 = true;
+                        who = e.Player.Index;
+                    }
+                    break;
+                case "shmake":
+                    if (e.Message.Length <= 7)
+                    {
+                        e.Player.SendErrorMessage("Please provide a name for the safe house.");
+                        return;
+                    }
+                    if (leftPoint.Equals(Vector2.Zero) || rightPoint.Equals(Vector2.Zero))
+                        return;
+                    string name = e.Message.Substring(7);
+                    region.Add(new Region(name, leftPoint, rightPoint));
+                    e.Player.SendSuccessMessage("Safe house " + name + " has been made.");
+                    goto case "shreset";
+                case "shreset":
+                    leftPoint = Vector2.Zero;
+                    rightPoint = Vector2.Zero;
+                    e.Player.SendInfoMessage("Points 1 and 2 have been unset.");
+                    break;
+                case "shlist":
+                    string list = string.Empty;
+                    if (region.Count > 0)
+                    {
+                        foreach (Region r in region)
+                            list += r.name + " ";
+                        e.Player.SendSuccessMessage(list);
+                    }
+                    break;
+                default:
+                    break;                    
             }
-            if (e.Message.Contains("set2") && !e.Message.Contains("1"))
-            {
-                e.Player.SendInfoMessage("Mine at a tile to set the second corner" + (await1 ? " (reset set1)" : "."));
-                if (await1)
-                    await1 = false;
-                await2 = true;
-                who = e.Player.Index;
-            }
-        }
-        private void MakeRegion(CommandArgs e)
-        {
-            if (e.Message.Length <= 7)
-            {
-                e.Player.SendErrorMessage("Please provide a name for the safe house.");
-                return;
-            }
-            if (leftPoint.Equals(Vector2.Zero) || rightPoint.Equals(Vector2.Zero))
-                return;
-            string name = e.Message.Substring(7);
-            region.Add(new Region(name, leftPoint, rightPoint));
-            e.Player.SendSuccessMessage("Safe house " + name + " has been made.");
-            Reset(e);
-        }
-        private void Reset(CommandArgs e)
-        {
-            leftPoint = Vector2.Zero;
-            rightPoint = Vector2.Zero;
-            e.Player.SendInfoMessage("Points 1 and 2 have been unset.");
-        }
-        private void List(CommandArgs e)
-        {
-            string list = string.Empty;
-            if (region.Count > 0)
-            {
-                foreach (Region r in region)
-                    list += r.name + " ";
-                e.Player.SendSuccessMessage(list);
-            }
-        }
-    }
-    struct Vector2
-    {
-        public float X;
-        public float Y;
-        public Vector2(float x, float y)
-        {
-            this.X = x;
-            this.Y = y;
-        }
-        public static Vector2 Zero
-        {
-            get { return new Vector2(0f, 0f); }
-        }
-    }
-    struct Region
-    {
-        public string name;
-        public Vector2 point1;
-        public Vector2 point2;
-        public Region(string name, Vector2 tl, Vector2 br)
-        {
-            if (br.X < tl.X || tl.Y > br.Y)
-            {
-                this.point1 = br;
-                this.point2 = tl;
-            }
-            else
-            {
-                this.point1 = tl;
-                this.point2 = br;
-            }
-            this.name = name;
-        }
-        public bool Contains(float X, float Y)
-        {
-            return X >= point1.X && X <= point2.X && Y >= point1.Y && Y <= point2.Y;
-        }
-    }
-    internal class SHPlayer
-    {
-        public int who;
-        public bool healed;
-        public int oldLife;
-        public TSPlayer tsp
-        {
-            get { return TShock.Players[who]; }
         }
     }
 }
