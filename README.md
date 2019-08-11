@@ -1,4 +1,4 @@
-# tShock-Plugins
+# tServerApi-Plugins
 A repository containing [any] tShock plugins.
 
 ## Compiling from source
