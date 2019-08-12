@@ -1,2 +1,2 @@
-C:\Windows\Microsoft.NET\Framework\v4.0.30319\csc.exe /out:.\bin\Release\SafeHouse.dll /target:library /recurse:Plugin.cs /recurse:AssemblyInfo.cs /reference:OTAPI.dll,TShockAPI.dll,TerrariaServer.exe
+C:\Windows\Microsoft.NET\Framework\v4.0.30319\csc.exe /out:.\v5\SafeRegions.dll /target:library /recurse:Plugin.cs /recurse:AssemblyInfo.cs /reference:..\ref\OTAPI.dll,..\ref\TShockAPI.dll,..\ref\TerrariaServer.exe,..\lib\RUDD.Native.dll
 timeout 10

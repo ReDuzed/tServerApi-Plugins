@@ -21,16 +21,17 @@ namespace safehouse
         private int who = 255;
         private List<SHPlayer> shp = new List<SHPlayer>();
         private int oldCount, regionCount;
-        private int limit;
         private Command remove = null;
         private Command regions = null;
+        private const string config = ".\\tshock\\region_config_";
+        private string realConfig = config;
         public override string Name
         {
             get { return "Safe Regions"; }
         }
         public override Version Version
         {
-            get { return new Version(0, 1); }
+            get { return new Version(0, 3); }
         }
         public override string Author 
         {
@@ -51,6 +52,7 @@ namespace safehouse
             ServerApi.Hooks.ServerJoin.Register(this, OnJoin);
             ServerApi.Hooks.ServerLeave.Register(this, OnLeave);
             ServerApi.Hooks.GameUpdate.Register(this, SafeRegion);
+            ServerApi.Hooks.GamePostInitialize.Register(this, OnPostInit);
         }
         protected override void Dispose(bool disposing)
         {
@@ -61,6 +63,7 @@ namespace safehouse
                 ServerApi.Hooks.ServerJoin.Deregister(this, OnJoin);
                 ServerApi.Hooks.ServerLeave.Deregister(this, OnLeave);
                 ServerApi.Hooks.GameUpdate.Deregister(this, SafeRegion);
+                ServerApi.Hooks.GamePostInitialize.Deregister(this, OnPostInit);
             }
             base.Dispose(disposing);
         }
@@ -226,6 +229,7 @@ namespace safehouse
                     string name = e.Message.Substring(7);
                     region.Add(new Region(name, leftPoint, rightPoint));
                     e.Player.SendSuccessMessage("Safe house " + name + " has been made.");
+                    WriteRegion(leftPoint, rightPoint, name);
                     goto case "shreset";
                 case "shreset":
                     leftPoint = Vector2.Zero;
@@ -243,6 +247,59 @@ namespace safehouse
                     break;
                 default:
                     break;                    
+            }
+        }
+        private void OnPostInit(EventArgs e)
+        {
+            Action a = null;
+            a = delegate() 
+            {
+                realConfig = config;
+                realConfig += string.Concat(Main.worldName, ".ini").Replace(' ', '_');
+            };
+            a.Invoke();
+            ReadRegions();
+        }
+        private void ReadRegions()
+        {
+            if (!File.Exists(realConfig))
+            {
+                var file = File.Create(realConfig);
+                file.Close();
+                file.Dispose();
+            }
+            string[] lines = null;
+            using (StreamReader sr = new StreamReader(realConfig))
+                lines = sr.ReadToEnd().Split('\n');
+            if (lines.Length > 1)
+            {
+                float   x1 = 0f,
+                        y1 = 0f, 
+                        x2 = 0f, 
+                        y2 = 0f;
+                for (int i = 0; i < lines.Length - 2; i += 3)
+                {
+                    float.TryParse(lines[i + 1].Substring(0, lines[i + 1].IndexOf(' ')), out x1);
+                    float.TryParse(lines[i + 1].Substring(lines[i + 1].IndexOf(' ') + 1), out y1);
+                    float.TryParse(lines[i + 2].Substring(0, lines[i + 2].IndexOf(' ')), out x2);
+                    float.TryParse(lines[i + 2].Substring(lines[i + 2].IndexOf(' ') + 1), out y2);
+                    region.Add(new Region()
+                    {
+                        name = lines[i],
+                        point1 = new Vector2(x1, y1),
+                        point2 = new Vector2(x2, y2)
+                    });
+                }
+            }
+        }
+        private void WriteRegion(Vector2 vec1, Vector2 vec2, string name)
+        {
+            using (StreamWriter sw = new StreamWriter(realConfig, true))
+            {
+                sw.NewLine = "\n";
+                sw.WriteLine(name);
+                sw.WriteLine(vec1.X + " " + vec1.Y);
+                sw.WriteLine(vec2.X + " " + vec2.Y);
             }
         }
     }
