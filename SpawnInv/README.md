@@ -3,4 +3,4 @@ When a player dies and is respawned, their inventory is given whatever items are
 
 Permissions are: ``invset.admin.opt``, ``invset.admin.setitems``
 
-Admin commands: ``/additem``,  ``/removeitem``, ``/listitems``, ``/clearitems``, ``invport``
+Admin commands: ``/additem``,  ``/removeitem``, ``/listitems``, ``/clearitems``, ``/invopt``
