@@ -1,0 +1,2 @@
+C:\Windows\Microsoft.NET\Framework\v4.0.30319\csc.exe /out:.\v5\SpawnInv.dll /target:library /recurse:.\v5\Plugin.cs /reference:..\ref\OTAPI.dll,..\ref\TShockAPI.dll,..\ref\TerrariaServer.exe,..\lib\RUDD.Native.dll
+timeout 10
