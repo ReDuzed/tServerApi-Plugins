@@ -44,10 +44,13 @@ namespace rnd_tp
                     "enabled",
                     "cooldown"
                 },
-                path = "\\ServerPlugins\\rndtp_config"
+                path = "config\\rndtp_config" + Ini.ext
             };
             if (!File.Exists(ini.path))
+            {
+                Directory.CreateDirectory("config");
                 ini.WriteFile(new string[] { true.ToString(), 60.ToString() });
+            }
             else
             {
                 string e = string.Empty, m = string.Empty;
