@@ -6,6 +6,7 @@ using Terraria.Localization;
 using TShockAPI;
 using TShockAPI.Hooks;
 using TerrariaApi.Server;
+using RUDD.Dotnet;
 
 namespace rnd_tp
 {
@@ -16,7 +17,7 @@ namespace rnd_tp
         private bool update = true;
         private List<Vector2> position = new List<Vector2>();
         private List<User> users = new List<User>();
-        private int maxCooldown = second * 30;
+        private int maxCooldown = 30;
         private const int second = 60;
         public override string Name
         {
@@ -36,6 +37,26 @@ namespace rnd_tp
         }
         public override void Initialize()
         {
+            Ini ini = new Ini()
+            {
+                setting = new string[]
+                {
+                    "enabled",
+                    "cooldown"
+                },
+                path = "\\ServerPlugins\\rndtp_config"
+            };
+            if (!File.Exists(ini.path))
+                ini.WriteFile(new string[] { true.ToString(), 60.ToString() });
+            else
+            {
+                string e = string.Empty, m = string.Empty;
+                var i = ini.ReadFile();
+                Ini.TryParse(i[0], out e);
+                Ini.TryParse(i[1], out m);
+                bool.TryParse(e, out enabled);
+                int.TryParse(m, out maxCooldown);
+            }
             ServerApi.Hooks.ServerChat.Register(this, OnChat);
             ServerApi.Hooks.NetGetData.Register(this, OnGetData);
             ServerApi.Hooks.GameInitialize.Register(this, OnInit);
@@ -86,7 +107,7 @@ namespace rnd_tp
             {
                 if (u.whoAmI == e.Player.Index && u.cooldown > 0)
                 {
-                    e.Player.SendMessage("Overworld teleport cooldown: " + (u.cooldown / 60) + " seconds", 150, 255, 150);
+                    e.Player.SendMessage("Overworld teleport cooldown: " + (u.cooldown / 60) + " seconds", 100, 255, 100);
                     return;
                 }
                 else user = u;
@@ -117,7 +138,7 @@ namespace rnd_tp
             }
             users.Add(new User(e.Who)
             {
-                cooldown = 60 * maxCooldown
+                cooldown = 60 * 15
             });
         }
         private void OnLeave(LeaveEventArgs e)
