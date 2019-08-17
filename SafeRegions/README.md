@@ -1,4 +1,4 @@
-# Safe Regions (AKA Safe Houses)
+# Safe Regions
 Designates areas marked by the user to be regions where players auto-heal if their health isn't at maximum.
 
 Permissions are: ``safehouse.admin.regions``
