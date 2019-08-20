@@ -119,7 +119,7 @@ namespace rnd_tp
             {
                 position.Clear();
                 int spawnY = Main.spawnTileY - 100;
-                for (int i = 100; i < Main.maxTilesY; i++)
+                for (int i = 100; i < Main.maxTilesX - 100; i++)
                 for (int j = spawnY; j < spawnY + 200; j++)
                 {
                     if (Main.tile[i, j].wall == Terraria.ID.WallID.None && !Main.tile[i, j].active() && !Main.tile[i + 1, j].active() && Main.tile[i, j + 1].active() && Main.tileSolid[Main.tile[i, j+ 1].type])
