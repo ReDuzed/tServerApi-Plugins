@@ -1,5 +1,5 @@
 # tServerApi-Plugins
-A repository containing [any] tShock plugins.
+A repository containing [any] TAPI plugins.
 
 ## Compiling from source
 While this may sound complicated, don't worry because each computer with the .NET Framework about version 4.0 will have the C# compiler stored in [usually] the same location.
