@@ -8,7 +8,7 @@ using TShockAPI.Hooks;
 using TerrariaApi.Server;
 using RUDD;
 
-namespace safehouse
+namespace saferegion
 {
     [ApiVersion(2, 1)]
     public class Plugin : TerrariaPlugin
@@ -23,8 +23,10 @@ namespace safehouse
         private int oldCount, regionCount;
         private Command remove = null;
         private Command regions = null;
-        private const string config = ".\\tshock\\region_config_";
+        private const string config = "config\\region_config_";
         private string realConfig = config;
+        private bool pvpRegions;
+        private const bool checkBoss = true;
         public override string Name
         {
             get { return "Safe Regions"; }
@@ -39,7 +41,7 @@ namespace safehouse
         }
         public override string Description
         {
-            get { return "This plugin features setting regions where player damage is completely nullified."; }
+            get { return "This plugin features setting regions where player PvP status is disabled, and damage is completely nullified."; }
         }
         
         public Plugin(Main game) : base(game)
@@ -67,6 +69,7 @@ namespace safehouse
             }
             base.Dispose(disposing);
         }
+
         private void OnJoin(JoinEventArgs e)
         {
             shp.Add(new SHPlayer()
@@ -97,47 +100,77 @@ namespace safehouse
                 regionCount = region.Count;
                 return;
             }
-            foreach (Region r in region)
+            bool bossActive = false;
+            NPC boss = null;
+            foreach (NPC n in Main.npc)
             {
-                if (r.Equals(null))
-                    continue;
-                foreach (var p in shp)
+                if (n.active && n.boss && Main.player[n.FindClosestPlayer()].Distance(n.position) < 100 * 16)
                 {
-                    if (p == null)
+                    boss = n;
+                    bossActive = true;
+                    break;
+                }
+            }
+            foreach (var p in shp)
+            {
+                if (p == null)
+                    continue;
+                foreach (Region r in region)
+                {
+                    if (r.Equals(null))
                         continue;
                     Player player = Main.player[p.who];
-                    if (player.statLife != p.oldLife)
+                    bool contains = r.Contains(player.position.X, player.position.Y);
+                    if (pvpRegions)
                     {
-                        if (r.Contains(player.position.X, player.position.Y))
+                        if (contains) 
+                        { 
+                            if (!p.reserved)
+                            {
+                                TogglePvp(p.who, false);
+                                p.reserved = true;
+                            }
+                            break;
+                        }
+                        else
+                        {
+                            TogglePvp(p.who, true);
+                            p.reserved = false;
+                        }
+                    }
+                    if (contains && !bossActive)
+                    {
+                        if (player.statLife != p.oldLife)
                         {
                             if (!p.healed)
                             {
                                 var tsp = TShock.Players[p.who];
-                                tsp.Heal();
+                                tsp.Heal(player.statLifeMax - player.statLife);
                                 p.healed = true;
-                                tsp.SendData(PacketTypes.PlayerHp, "", p.who);
+                                tsp.SendData(PacketTypes.EffectHeal, "", p.who, player.statLifeMax - player.statLife);
                                 continue;
                             }
                             p.oldLife = player.statLife;
                         }
+                        else p.healed = false;
                     }
-                    else p.healed = false;
                 }
             }
             oldCount = shp.Count;
         }
         private void OnCommand(CommandEventArgs e)
         {
-            if (!Commands.ChatCommands.Contains(remove))
-            Commands.ChatCommands.Add(remove = new Command("safehouse.admin.remove", ShRemove, "shremove")
-            {
-                HelpText = "Causes removal of safe region by name or index"
-            });
             if (!Commands.ChatCommands.Contains(regions))
-            Commands.ChatCommands.Add(regions = new Command("safehouse.admin.regions", SafeRegion, new string[] { "shset1", "shset2", "shmake", "shreset", "shlist" }) 
             {
-                HelpText = Name + ": Modifies the safe region parameters"
-            });
+                Commands.ChatCommands.Add(remove = new Command("saferegion.admin.remove", ShRemove, "shremove")
+                {
+                    HelpText = "Causes removal of safe region by name or index"
+                });
+                Commands.ChatCommands.Add(regions = new Command("saferegion.admin.regions", SafeRegion, new string[] { "shset1", "shset2", "shmake", "shreset", "shlist", "pvpregion" }) 
+                {
+                    HelpText = Name + ": Modifies the safe region parameters"
+                });
+            }
         }
         private void OnGetData(GetDataEventArgs e)
         {
@@ -178,7 +211,10 @@ namespace safehouse
                 if (region.Count - 1 >= index)
                 {
                     if (!region[index].Equals(null))
+                    {
                         region.Remove(region[index]);
+                        e.Player.SendSuccessMessage(string.Concat(region[index].name, " region removed."));
+                    }
                 }
             }
             else
@@ -188,6 +224,8 @@ namespace safehouse
                     if (input == r.name)
                     {
                         region.Remove(r);
+                        e.Player.SendSuccessMessage(string.Concat(r.name, " region removed."));
+                        break;
                     }
                 }
             }
@@ -221,14 +259,22 @@ namespace safehouse
                 case "shmake":
                     if (e.Message.Length <= 7)
                     {
-                        e.Player.SendErrorMessage("Please provide a name for the safe house.");
+                        e.Player.SendErrorMessage("Please provide a name for the safe region.");
                         return;
                     }
                     if (leftPoint.Equals(Vector2.Zero) || rightPoint.Equals(Vector2.Zero))
                         return;
                     string name = e.Message.Substring(7);
-                    region.Add(new Region(name, leftPoint, rightPoint));
-                    e.Player.SendSuccessMessage("Safe house " + name + " has been made.");
+                    foreach (Region r in region)
+                    {
+                        if (name == r.name)
+                        {
+                            e.Player.SendErrorMessage("Safe region " + name + " already exists.");
+                            return;
+                        }
+                    }
+                    region.Add(new Region(name, leftPoint, rightPoint, true));
+                    e.Player.SendSuccessMessage("Safe region " + name + " has been made.");
                     WriteRegion(leftPoint, rightPoint, name);
                     goto case "shreset";
                 case "shreset":
@@ -245,19 +291,18 @@ namespace safehouse
                         e.Player.SendSuccessMessage(list);
                     }
                     break;
+                case "pvpregion":
+                    pvpRegions = !pvpRegions;
+                    e.Player.SendSuccessMessage("Regions disabling PvP has been " + (pvpRegions ? "enabled" : "disabled") + ".");
+                    break;
                 default:
                     break;                    
             }
         }
         private void OnPostInit(EventArgs e)
         {
-            Action a = null;
-            a = delegate() 
-            {
-                realConfig = config;
-                realConfig += string.Concat(Main.worldName, ".ini").Replace(' ', '_');
-            };
-            a.Invoke();
+            realConfig = config;
+            realConfig += string.Concat(Main.worldName, ".ini").Replace(' ', '_');
             ReadRegions();
         }
         private void ReadRegions()
@@ -300,6 +345,16 @@ namespace safehouse
                 sw.WriteLine(name);
                 sw.WriteLine(vec1.X + " " + vec1.Y);
                 sw.WriteLine(vec2.X + " " + vec2.Y);
+            }
+        }
+        private void TogglePvp(int who, bool enabled)
+        {
+            Main.player[who].hostile = enabled;
+            foreach (TSPlayer tsp in TShock.Players)
+            {
+                if (tsp != null) 
+                if (tsp.TPlayer.active)
+                    tsp.SendData(PacketTypes.TogglePvp, "", who);
             }
         }
     }
