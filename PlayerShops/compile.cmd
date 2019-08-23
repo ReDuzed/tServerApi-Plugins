@@ -1,0 +1,2 @@
+C:\Windows\Microsoft.NET\Framework\v4.0.30319\csc.exe /out:PlayerShops.dll /target:library /recurse:Plugin.cs /recurse:AssemblyInfo.cs /reference:..\ref\OTAPI.dll,..\ref\TShockAPI.dll,..\ref\TerrariaServer.exe,..\lib\RUDD.Dotnet.dll,..\lib\RUDD.Native.dll,..\lib\RUDD.Terraria.dll
+timeout 10
