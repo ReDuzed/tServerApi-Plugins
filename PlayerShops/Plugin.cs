@@ -13,13 +13,13 @@ using RUDD;
 using RUDD.Dotnet;
 using RUDD.Terraria;
 
-namespace chestshop
+namespace playershop
 {
     [ApiVersion(2,1)]
     public class Plugin : TerrariaPlugin
     {
         
-        private ShopChest[] shop = new ShopChest[501];
+        private ShopChest[] shop = new ShopChest[500];
         private Command command;
         private ShopChest[] active = new ShopChest[256];
         private bool[] canSelect = new bool[256];
@@ -28,6 +28,9 @@ namespace chestshop
         private Item[][] oldInventory = new Item[256][];
         private bool[] justBought = new bool[256];
         private bool priceDouble;
+        private DataStore data;
+        private bool[] chestRefill = new bool[256];
+        private bool[] resetContents = new bool[500];
         public override string Name
         {
             get { return "Player Shops"; }
@@ -38,7 +41,7 @@ namespace chestshop
         }
         public override Version Version
         {
-            get { return new Version(0, 3); }
+            get { return new Version(0, 4); }
         }
         public override string Description
         {
@@ -49,25 +52,29 @@ namespace chestshop
         }
         public override void Initialize()
         {
+            data = new DataStore("config\\player_shop");
             for (int i = 0; i < Main.player.Length; i++)
                 oldInventory[i] = new Item[NetItem.InventorySlots];
             ServerApi.Hooks.NetGetData.Register(this, OnGetData);
             ServerApi.Hooks.ServerCommand.Register(this, OnCommand);
             ServerApi.Hooks.GameUpdate.Register(this, OnUpdate);
             ServerApi.Hooks.ServerJoin.Register(this, OnJoin);
+            ServerApi.Hooks.GamePostInitialize.Register(this, OnPostInit);
         }
         protected override void Dispose(bool disposing)
         {
+            data.WriteToFile();
             if (disposing)
             {
                 ServerApi.Hooks.NetGetData.Deregister(this, OnGetData);
                 ServerApi.Hooks.ServerCommand.Deregister(this, OnCommand);
                 ServerApi.Hooks.GameUpdate.Deregister(this, OnUpdate);
                 ServerApi.Hooks.ServerJoin.Deregister(this, OnJoin);
+                ServerApi.Hooks.GamePostInitialize.Deregister(this, OnPostInit);
             }
             base.Dispose(disposing);
         }
-
+        
         private void OnGetData(GetDataEventArgs e)
         {
             if (!e.Handled)
@@ -100,7 +107,7 @@ namespace chestshop
                                     {
                                         if (sc.contents[i] != null)
                                         {
-                                            if (sc.refill)
+                                            if (sc.refill || resetContents[sc.index2])
                                             {
                                                 Main.chest[sc.index].item[i].netDefaults(sc.contents[i].type);
                                                 Main.chest[sc.index].item[i].stack = sc.contents[i].stack;
@@ -109,6 +116,7 @@ namespace chestshop
                                             }
                                         }
                                     }
+                                    resetContents[sc.index2] = false;
                                     break;
                                 }
                             }
@@ -143,18 +151,30 @@ namespace chestshop
                                     {
                                         if (itemID == 0)
                                         {
-                                            if (sc.contents[slot].type != 0)
+                                            if (sc.contents != null)
                                             {
-                                                int value = Main.hardMode && priceDouble ? sc.contents[slot].value * 2 : sc.contents[slot].value;
-                                                if (!CoinPurse.ShopItem(player.whoAmI, value))
+                                                if (sc.contents[slot] != null)
                                                 {
-                                                    active[player.whoAmI] = new ShopChest();
-                                                    active[player.whoAmI].invalid = new Item();
-                                                    active[player.whoAmI].invalid.netDefaults(sc.contents[slot].type);
-                                                    active[player.whoAmI].invalid.stack = sc.contents[slot].stack;
-                                                    active[player.whoAmI].invalid.prefix = sc.contents[slot].prefix;
-                                                    TShock.Players[player.whoAmI].SendInfoMessage(string.Concat("This item requires ", value, " copper."));
-                                                    justBought[player.whoAmI] = true;
+                                                    if (sc.contents[slot].type != 0)
+                                                    {
+                                                        int value = sc.contents[slot].value == 0 ? sc.chest.item[slot].value : sc.contents[slot].value;
+                                                        value = Main.hardMode && priceDouble ? value * 2 : value;
+                                                        if (!CoinPurse.ShopItem(player.whoAmI, value))
+                                                        {
+                                                            active[player.whoAmI] = new ShopChest();
+                                                            active[player.whoAmI].invalid = new Item();
+                                                            active[player.whoAmI].invalid.netDefaults(sc.contents[slot].type);
+                                                            active[player.whoAmI].invalid.stack = sc.contents[slot].stack;
+                                                            active[player.whoAmI].invalid.prefix = sc.contents[slot].prefix;
+                                                            TShock.Players[player.whoAmI].SendInfoMessage(string.Concat("This item requires ", value, " copper."));
+                                                            justBought[player.whoAmI] = true;
+                                                            resetContents[sc.index2] = true;
+                                                        }
+                                                        else if (!sc.refill)
+                                                        {
+                                                            sc.contents[slot].type = 0;
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
@@ -202,7 +222,7 @@ namespace chestshop
                                         {
                                             for (int i = 0; i < shop.Length; i++)
                                             {
-                                                if (shop[i] == null)
+                                                if (shop[i] == null || !shop[i].enabled)
                                                 {
                                                     for (int j = 0; j < Main.chest.Length; j++)
                                                     {
@@ -212,11 +232,28 @@ namespace chestshop
                                                             shop[i].chest = Main.chest[j];
                                                             shop[i].contents = ShopItem.Convert(Main.chest[j].item, priceFloor[player.whoAmI]);
                                                             shop[i].index = j;
-                                                            shop[i].x = x;
-                                                            shop[i].y = y;
+                                                            shop[i].index2 = i;
+                                                            shop[i].x = Main.chest[j].x;
+                                                            shop[i].y = Main.chest[j].y;
                                                             shop[i].enabled = true;
                                                             shop[i].active = true;
                                                             shop[i].owner = player.whoAmI;
+                                                            shop[i].value = priceFloor[player.whoAmI];
+                                                            shop[i].refill = chestRefill[player.whoAmI];
+                                                            if (data.BlockExists("Chest" + j))
+                                                            {
+                                                                var block = data.GetBlock("Chest" + j);
+                                                                block.WriteValue("ChestX", x.ToString());
+                                                                block.WriteValue("ChestY", y.ToString());
+                                                                block.WriteValue("Index", j.ToString());
+                                                                block.WriteValue("OwnerID", player.whoAmI.ToString());
+                                                                block.WriteValue("Price", priceFloor[player.whoAmI].ToString());
+                                                                block.WriteValue("Refill", chestRefill[player.whoAmI].ToString());
+                                                                for (int m = 0; m < shop[i].contents.Length; m++)
+                                                                {
+                                                                    block.WriteValue("Slot" + m, shop[i].contents[m].type.ToString());
+                                                                }
+                                                            }
                                                             canSelect[player.whoAmI] = false;
                                                             priceFloor[player.whoAmI] = 0;
                                                             TShock.Players[player.whoAmI].SendSuccessMessage("The chest is now set as a shop.");
@@ -239,7 +276,7 @@ namespace chestshop
         {
             if (command == null)
             {
-                Commands.ChatCommands.Add(new Command("playershop.place", PrePlaceChest, "shopstart")
+                Commands.ChatCommands.Add(command = new Command("playershop.place", PrePlaceChest, "shopstart")
                 {
                     HelpText = "Precludes placing a shop chest"
                 });
@@ -251,16 +288,15 @@ namespace chestshop
                 {
                     HelpText = "Used before selecting a chest with a pickaxe"
                 });
-                Commands.ChatCommands.Add(command = new Command("playershop.tools.hm", PriceChange, "hmdouble")
+                Commands.ChatCommands.Add(new Command("playershop.tools.hm", PriceChange, "hmdouble")
                 {
                     HelpText = "Changes whether or not shop prices double for hard mode"
                 });
+                Commands.ChatCommands.Add(new Command("playershop.tools.refill", RefillOpt, "refillopt")
+                {
+                    HelpText = "For setting the chest refill option"
+                });
             }
-        }
-        private void PriceChange(CommandArgs e)
-        {
-            priceDouble = !priceDouble;
-            e.Player.SendSuccessMessage(string.Concat("Prices are now doubled while in hard mode [", priceDouble ? "enabled" : "disabled", "]."));
         }
         private void OnUpdate(EventArgs e)
         {
@@ -292,15 +328,71 @@ namespace chestshop
         private void OnJoin(JoinEventArgs e)
         {
             oldInventory[e.Who] = (Item[])Main.player[e.Who].inventory.Clone();
+            chestRefill[e.Who] = false;
+        }
+        private void OnPostInit(EventArgs e)
+        {
+            string[] list = new string[46]; 
+            list[0] = "ChestX";
+            list[1] = "ChestY";
+            list[2] = "Index";
+            list[3] = "OwnerID";
+            list[4] = "Price";
+            list[5] = "Refill";
+            for (int i = 6; i < 46; i++)
+                list[i] += "Slot" + (i - 6);
+            for (int m = 0; m < shop.Length; m++)
+            {
+                string heading = "Chest" + m;
+                if (!data.BlockExists(heading))
+                    data.NewBlock(list, heading);
+                else
+                {
+                    var block = data.GetBlock(heading);
+                    int Index = int.Parse(block.GetValue("Index"));
+                    int value = int.Parse(block.GetValue("Price"));
+                    bool Refill = block.GetValue("Refill").ToLower() != "true" ? false : true;
+                    shop[m] = new ShopChest()
+                    {
+                        active = true,
+                        enabled = Index != 0,
+                        refill = Refill,
+                        owner = int.Parse(block.GetValue("OwnerID")),
+                        index = Index,
+                        index2 = m
+                    };
+                    if (shop[m].enabled)
+                    {
+                        shop[m].chest = Main.chest[Index];
+                        shop[m].x = shop[m].chest.x;
+                        shop[m].y = shop[m].chest.y;
+                        for (int j = 0; j < shop[m].contents.Length; j++)
+                        {
+                            shop[m].contents[j] = new ShopItem()
+                            {
+                                type = int.Parse(block.GetValue("Slot" + j)),
+                                value = int.Parse(block.GetValue("Price")),
+                                stack = 1,
+                                prefix = 0
+                            };
+                        }
+                    }
+                }
+            }
         }
 
+        private void PriceChange(CommandArgs e)
+        {
+            priceDouble = !priceDouble;
+            e.Player.SendSuccessMessage(string.Concat("Prices are now doubled while in hard mode [", priceDouble ? "enabled" : "disabled", "]."));
+        }
         private void PreChooseChest(CommandArgs e)
         {
             string opt = string.Empty;
             if (e.Message.Contains(" "))
             {
                 int value = 0;
-                 opt = e.Message.Substring(e.Message.IndexOf(" ") + 1);
+                opt = e.Message.Substring(e.Message.IndexOf(" ") + 1);
                 if (int.TryParse(opt, out value))
                 {
                     priceFloor[e.Player.Index] = value;
@@ -422,6 +514,11 @@ namespace chestshop
                 }
             }
         }
+        private void RefillOpt(CommandArgs e)
+        {
+            chestRefill[e.Player.Index] = !chestRefill[e.Player.Index];
+            e.Player.SendSuccessMessage(string.Concat("Selected chests [will", chestRefill[e.Player.Index] ? "" : " not", "] refill."));
+        }
 
         private void RemoveItem(Item item, int who, int slot, int stack)
         {
@@ -431,7 +528,6 @@ namespace chestshop
         {
             if (Main.player[who].inventory != oldInventory[who])
             {
-                Console.WriteLine("Attempting reset.");
                 var clone = (Item[])oldInventory[who].Clone();
                 for (int i = 0; i < NetItem.InventorySlots; i++)
                 {
@@ -479,6 +575,8 @@ namespace chestshop
         public ShopItem[] contents = new ShopItem[40];
         public bool refill = true;
         public Item invalid;
+        public int value;
+        public int index2;
     }
     internal class ShopItem
     {
