@@ -41,7 +41,7 @@ namespace playershop
         }
         public override Version Version
         {
-            get { return new Version(0, 4); }
+            get { return new Version(0, 5); }
         }
         public override string Description
         {
@@ -363,18 +363,25 @@ namespace playershop
                     };
                     if (shop[m].enabled)
                     {
-                        shop[m].chest = Main.chest[Index];
-                        shop[m].x = shop[m].chest.x;
-                        shop[m].y = shop[m].chest.y;
-                        for (int j = 0; j < shop[m].contents.Length; j++)
+                        if (Main.chest[Index] != null)
                         {
-                            shop[m].contents[j] = new ShopItem()
+                            shop[m].chest = Main.chest[Index];
+                            shop[m].x = shop[m].chest.x;
+                            shop[m].y = shop[m].chest.y;
+                            for (int j = 0; j < shop[m].contents.Length; j++)
                             {
-                                type = int.Parse(block.GetValue("Slot" + j)),
-                                value = int.Parse(block.GetValue("Price")),
-                                stack = 1,
-                                prefix = 0
-                            };
+                                shop[m].contents[j] = new ShopItem()
+                                {
+                                    type = int.Parse(block.GetValue("Slot" + j)),
+                                    value = int.Parse(block.GetValue("Price")),
+                                    stack = 1,
+                                    prefix = 0
+                                };
+                            }
+                        }
+                        else
+                        {
+                            shop[m].enabled = false;
                         }
                     }
                 }
