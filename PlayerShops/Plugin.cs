@@ -1,5 +1,6 @@
 ﻿using System;
 using System.IO;
+using System.Collections.Generic;
 using Terraria;
 using Terraria.ID;
 using Terraria.Localization;
@@ -31,6 +32,8 @@ namespace playershop
         private DataStore data;
         private bool[] chestRefill = new bool[256];
         private bool[] resetContents = new bool[500];
+        private List<CoinStorage> stored = new List<CoinStorage>();
+        private bool[] soldItem = new bool[256];
         public override string Name
         {
             get { return "Player Shops"; }
@@ -41,7 +44,7 @@ namespace playershop
         }
         public override Version Version
         {
-            get { return new Version(0, 5); }
+            get { return new Version(1, 0, 3); }
         }
         public override string Description
         {
@@ -60,10 +63,12 @@ namespace playershop
             ServerApi.Hooks.GameUpdate.Register(this, OnUpdate);
             ServerApi.Hooks.ServerJoin.Register(this, OnJoin);
             ServerApi.Hooks.GamePostInitialize.Register(this, OnPostInit);
+            ServerApi.Hooks.ServerLeave.Register(this, OnLeave);
         }
         protected override void Dispose(bool disposing)
         {
             data.WriteToFile();
+            CoinStorage.data.WriteToFile();
             if (disposing)
             {
                 ServerApi.Hooks.NetGetData.Deregister(this, OnGetData);
@@ -71,6 +76,7 @@ namespace playershop
                 ServerApi.Hooks.GameUpdate.Deregister(this, OnUpdate);
                 ServerApi.Hooks.ServerJoin.Deregister(this, OnJoin);
                 ServerApi.Hooks.GamePostInitialize.Deregister(this, OnPostInit);
+                ServerApi.Hooks.ServerLeave.Deregister(this, OnLeave);
             }
             base.Dispose(disposing);
         }
@@ -170,9 +176,16 @@ namespace playershop
                                                             justBought[player.whoAmI] = true;
                                                             resetContents[sc.index2] = true;
                                                         }
-                                                        else if (!sc.refill)
+                                                        else 
                                                         {
-                                                            sc.contents[slot].type = 0;
+                                                            if (CoinStorage.data == null)
+                                                                CoinStorage.data = new DataStore("config\\coin_storage");
+                                                            var block = CoinStorage.data.GetBlock(TShock.Players[player.whoAmI].UUID);
+                                                            block.WriteValue("Deliver", "True");
+                                                            block.IncreaseValue("Coins", value);
+                                                            soldItem[sc.owner] = true;
+                                                            if (!sc.refill)
+                                                                sc.contents[slot].type = 0;
                                                         }
                                                     }
                                                 }
@@ -240,6 +253,7 @@ namespace playershop
                                                             shop[i].owner = player.whoAmI;
                                                             shop[i].value = priceFloor[player.whoAmI];
                                                             shop[i].refill = chestRefill[player.whoAmI];
+                                                            CoinStorage.WriteBlock(TShock.Players[player.whoAmI]);
                                                             if (data.BlockExists("Chest" + j))
                                                             {
                                                                 var block = data.GetBlock("Chest" + j);
@@ -322,6 +336,29 @@ namespace playershop
                         }
                     }
                     oldInventory[id] = (Item[])Main.player[id].inventory.Clone();
+                    string uuid = TShock.Players[player.whoAmI].UUID;
+                    if (CoinStorage.data != null && soldItem[player.whoAmI])
+                    {
+                        Console.WriteLine("Sold item?");
+                        if (CoinStorage.data.BlockExists(uuid) && player.name == CoinStorage.data.GetBlock(uuid).GetValue("Name"))
+                        {
+                            Console.WriteLine("Block exists");
+                            var block = CoinStorage.data.GetBlock(uuid);
+                            bool deliver = false;
+                            int value = 0;
+                            if (bool.TryParse(block.GetValue("Deliver"), out deliver) && int.TryParse(block.GetValue("Coins"), out value))
+                            {
+                                Console.WriteLine("Deliver?");
+                                if (deliver)
+                                {
+                                    TShock.Players[player.whoAmI].GiveItem(ItemID.CopperCoin, "", 32, 48, value);
+                                    block.WriteValue("Coins", "0");
+                                    block.WriteValue("Deliver", "False");
+                                    soldItem[player.whoAmI] = false;
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -329,6 +366,9 @@ namespace playershop
         {
             oldInventory[e.Who] = (Item[])Main.player[e.Who].inventory.Clone();
             chestRefill[e.Who] = false;
+        }
+        private void OnLeave(LeaveEventArgs e)
+        {
         }
         private void OnPostInit(EventArgs e)
         {
@@ -607,5 +647,26 @@ namespace playershop
         public int stack;
         public byte prefix;
         public int value;
+    }
+    internal class CoinStorage
+    {
+        public static void WriteBlock(TSPlayer player)
+        {
+            if (data == null)
+                data = new DataStore("config\\coin_storage");
+            if (!data.BlockExists(player.UUID))
+            {
+                var block = data.NewBlock(new string[] 
+                {
+                    "Name",
+                    "Deliver",
+                    "Coins"
+                }, player.UUID);
+                block.WriteValue("Name", player.Name);
+                block.WriteValue("Deliver", "False");
+                block.WriteValue("Coins", "0");
+            }
+        }
+        public static DataStore data;
     }
 }
