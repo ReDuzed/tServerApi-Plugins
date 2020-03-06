@@ -1,1 +1,3 @@
-These sources comprise the three dependencies for most of the plugins.
+### Information
+
+Add OTAPI, TerrariaServer, and TShockAPI into this folder to compile correctly.
