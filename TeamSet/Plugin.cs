@@ -3,8 +3,6 @@ using System.IO;
 using Terraria;
 using Terraria.ID;
 using Terraria.Localization;
-using System.Net;
-using System.Net.Sockets;
 using TShockAPI;
 using TShockAPI.DB;
 using TShockAPI.Hooks;
@@ -12,300 +10,466 @@ using TerrariaApi.Server;
 using RUDD;
 using RUDD.Dotnet;
 
-
-namespace teamset
+namespace banner
 {
-    [ApiVersion(2,1)]
+    [ApiVersion(2, 1)]
     public class Plugin : TerrariaPlugin
     {
-        private string[] Teams
+        private string[] teams = new string[] 
         {
-            get { return new string[] { "None", "Red Team", "Green Team", "Blue Team", "Yellow Team", "Purple Team" }; }
-        }
-        private const string Empty = "0";
-        private bool kickOnSwitch;
+            "None", "Red Team", "Green Team", "Blue Team", "Yellow Team", "Pink Team"
+        };
         private DataStore data;
+        private bool enabled = false;
         private Command command;
+        private float MinMon
+        {
+            get { return minBanners * npcPerBanner; }
+            set { minBanners = (int)value / npcPerBanner; }
+        }
+        private float MaxBannerValue
+        {
+            get { return MinMon * TotalNpcs / minBanners; }
+        }
+        private int minBanners = 1;
+        private float MaxBanners
+        {
+            get { return (PointGoal * (TotalNpcs / MaxBannerValue)) / npcPerBanner; }
+        }
+        private float PointGoal
+        {
+            get { return MinMon * TotalNpcs; }
+        }
+        private const int npcPerBanner = 50;
+        private int TotalNpcs
+        {
+            get { return Main.npcTexture.Length; }
+        }
+        private float AverageBanners
+        {
+            get { return (MaxBanners + minBanners) / 2; }
+        }
+        private float hoursPerWeek = 192f;
+        private float HoursPerBanner
+        {
+            get { return hoursPerWeek / 600f; }
+        }
+        private double EstMaxTime
+        {
+            get { return AverageBanners * HoursPerBanner; }
+        }
+        private bool Event;
+        private string region = "access";
+        private bool[] tally = new bool[256];
+        private bool autoTurnIn;
         public override string Name
         {
-            get { return "Team Set"; }
+            get { return "Team Banners"; }
+        }
+        public override Version Version
+        {
+            get { return new Version(0, 1, 7); }
         }
         public override string Author
         {
             get { return "Duze"; }
         }
-        public override Version Version
-        {
-            get { return new Version(0, 1); }
-        }
         public override string Description
         {
-            get { return "Places players into teams on server join after they have been set to a team by an admin"; }
+            get { return "Two options are added: 1) a function for monster defeat counts per team, 2) recycling inventory tile items with banners adding weight in surplus"; }
         }
         public Plugin(Main game) : base(game)
         {
         }
+        private int PointsPerBanner(int b)
+        {
+            float n = Item.BannerToNPC(b);
+            return (int)((MaxBannerValue - n) * (n / TotalNpcs));
+        }
+        private Block setting;
+        private string winningTeam;
+        private bool teamHasWon;
+        private bool once;
+        private void StartData()
+        {
+            data = new DataStore(string.Concat("config\\", "banner_data_", Main.worldName));
+            string[] ids = new string[Main.npcTexture.Length + 1];
+            ids[0] = "score";
+            for (int i = 0; i < ids.Length - 1; i++)
+                ids[i + 1] += i;
+            foreach (string t in teams) 
+            {
+                if (!data.BlockExists(t))
+                    data.NewBlock(ids, t);
+            }
+            if (data.BlockExists("settings"))
+            {
+                setting = data.GetBlock("settings");
+                region = setting.GetValue("region");
+                bool.TryParse(setting.GetValue("auto"), out autoTurnIn);
+                bool.TryParse(setting.GetValue("event"), out Event);
+                int.TryParse(setting.GetValue("minimum"), out minBanners);
+                winningTeam = setting.GetValue("winner");
+            }
+            else
+            {
+                setting = data.NewBlock(new string[] 
+                {
+                    "region", "auto", "event", "minimum", "winner", "first"
+                }, "settings");
+            }
+        }
         public override void Initialize()
         {
-            Ini ini = new Ini()
-            {
-                setting = new string[] { "playersperteam", "kickonswitch" },
-                path = "config\\team_data" + Ini.ext
-            };
-            int total = 0;
-            if (!File.Exists(ini.path))
-                ini.WriteFile(new object[] { 4, false });
-            
-            string t = string.Empty;
-            string kick = string.Empty;
-            var file = ini.ReadFile();
-            if (file.Length > 0)
-            {
-                Ini.TryParse(file[0], out t);
-                Ini.TryParse(file[1], out kick);
-            }
-            bool.TryParse(kick, out kickOnSwitch);
-            total = int.Parse(t);
-
-            total = Math.Max(total, 2);
-            string[] Slots = new string[total];
-            for (int i = 0; i < total; i++)
-                Slots[i] = "players" + (i + 1);
-
-            data = new DataStore("config\\team_data");
-            foreach (string team in Teams)
-            {
-                if (!data.BlockExists(team))
-                    data.NewBlock(Slots, team);
-            }
-            ServerApi.Hooks.ServerJoin.Register(this, OnJoin);
-            ServerApi.Hooks.NetGetData.Register(this, OnGetData);
-            ServerApi.Hooks.ServerCommand.Register(this, OnCommand);
+            for (int i = 0; i < Main.player.Length; i++)
+                Stored.splr[i] = new Stored();
+            ServerApi.Hooks.NpcKilled.Register(this, OnNpcKilled);
+            ServerApi.Hooks.GameUpdate.Register(this, OnUpdate);
+            ServerApi.Hooks.ServerCommand.Register(this, CommandPopulate);
         }
         protected override void Dispose(bool disposing)
         {
             if (disposing)
             {
                 data.WriteToFile();
-                ServerApi.Hooks.ServerJoin.Deregister(this, OnJoin);
-                ServerApi.Hooks.NetGetData.Deregister(this, OnGetData);
-                ServerApi.Hooks.ServerCommand.Deregister(this, OnCommand);
+                ServerApi.Hooks.NpcKilled.Deregister(this, OnNpcKilled);
+                ServerApi.Hooks.GameUpdate.Deregister(this, OnUpdate);
+                ServerApi.Hooks.ServerCommand.Deregister(this, CommandPopulate);
             }
             base.Dispose(disposing);
         }
-        private void OnJoin(JoinEventArgs e)
+        private void OnNpcKilled(NpcKilledEventArgs e)
         {
-            SetTeam(e.Who, GetPlayerTeam(Main.player[e.Who].name));
-        }
-        private void OnGetData(GetDataEventArgs e)
-        {
-            if (!e.Handled)
+            if (!enabled)
+                return;
+            Player closest = Main.player[e.npc.FindClosestPlayer()];
+            var info = data.GetBlock(teams[closest.team]);
+            int val = info.IncreaseValue(e.npc.type.ToString(), 1);
+            if (val % 50 == 0 && val != 0)
             {
-                if (e.MsgID == PacketTypes.PlayerTeam)
+                TShock.Players[closest.whoAmI].GiveItem(e.npc.BannerID(), "", closest.width, closest.height, 1);
+                MessageAll(string.Concat(teams[closest.team], " has defeated ", val, " ", e.npc.FullName, "!"));
+            }
+        }
+        private void CommandPopulate(EventArgs e)
+        {
+            if (!Commands.ChatCommands.Contains(command))
+            {
+                Commands.ChatCommands.Add(new Command("banner.recycle", Recycle, new string[] { "recycle" })
                 {
-                    using (BinaryReader br = new BinaryReader(new MemoryStream(e.Msg.readBuffer, e.Index, e.Length)))
+                    HelpText = "Allows players to recycle their inventory's tile items for a new item based on the recycled types"
+                });
+                Commands.ChatCommands.Add(new Command("banner.admin.opt", TeamDropOpt, new string[] { "banneropt" })
+                {
+                    HelpText = "Opts to allow whether or not banner drops are per team's monster-defeat count"
+                });
+                Commands.ChatCommands.Add(new Command("banner.admin.region", BannerRegion, new string[] { "regbanner" })
+                {
+                    HelpText = "Sets region for turning in banners"
+                });
+                Commands.ChatCommands.Add(new Command("banner.tally", BannerTally, new string[] { "bannerscore" })
+                {
+                    HelpText = "Grants permission for players to turn check a team's score"
+                });
+                Commands.ChatCommands.Add(new Command("banner.tally", BannerGoal, new string[] { "bannergoal" })
+                {
+                    HelpText = "Grants permission for players to check point goal"
+                });
+                Commands.ChatCommands.Add(command = new Command("banner.tally", BannerTally, new string[] { "bannergive" })
+                {
+                    HelpText = "Grants permission for players to turn in banners"
+                });  
+            }
+        }
+        private void BannerGoal(CommandArgs e)
+        {
+            /*string msg = e.Message.Substring(12);
+            if (e.Message.Length <= 10)
+            {
+                e.Player.SendInfoMessage("Append [goal | team | winning] to this command.");
+            }
+            else if (msg.Contains("goal"))
+            {*/
+                e.Player.SendSuccessMessage(string.Concat("Total point goal is: ", PointGoal, "."));
+            /*}
+            else if (msg.Contains("team"))
+            {
+                
+            }*/
+        }
+        private void BannerRegion(CommandArgs e)
+        {
+            region = e.Message.Substring(10).Trim(' ');
+            e.Player.SendSuccessMessage("Region for banner turn-in set to " + region + ".");
+            setting.WriteValue("region", region);
+        }
+        private void OnUpdate(EventArgs e)
+        {
+            if (!once)
+            {
+                StartData();
+                once = true;
+            }
+            if (!Event)
+                return;
+            int total = 0;
+            foreach (TSPlayer tsp in TShock.Players)
+            {
+                if (tsp == null || !tsp.TPlayer.active || tsp.TPlayer.dead)
+                    continue;
+                if (tsp.CurrentRegion == null)
+                {
+                    tally[tsp.Index] = true;
+                    continue;
+                }
+                if (tsp.CurrentRegion.Name == region)
+                {
+                    if (tally[tsp.Index])
                     {
-                        byte who = br.ReadByte();
-                        byte team = br.ReadByte();
-                        int check = GetPlayerTeam(Main.player[who].name);
-                        SetTeam(who, check);
-                        if (kickOnSwitch && team != check && team != 0)
+                        for (int i = 0; i < tsp.TPlayer.inventory.Length; i++)
                         {
-                            TShock.Players[who].Disconnect("Kicked for switching teams.");
+                            var item = tsp.TPlayer.inventory[i];
+                            if (item.Name.ToLower().Contains("banner"))
+                            {
+                                total = TeamPoints(tsp.Team, BannerValue(item.type, item.stack));
+                                InvData(ref item, tsp.Index, i);
+                            }
+                            else continue;
                         }
+                        if (total > 0)
+                        {
+                            if (teamHasWon)
+                            {
+                                string winner;
+                                MessageTeam((winner = setting.GetValue("winner")) + " with " + data.GetBlock(winner).GetValue("score") + " points has already achieved victory.", tsp.Team);
+                                tally[tsp.Index] = false;
+                                return;
+                            }
+                            MessageTeam("Total banner point value: " + total + "!", tsp.Team);
+                            if (total >= PointGoal && setting.GetValue("winner") == "0")
+                            {
+                                setting.WriteValue("winner", teams[tsp.Team]);
+                                setting.WriteValue("first", teams[tsp.Team] + ";" + minBanners);
+                                MessageAll(string.Concat(teams[tsp.Team], " has achieved victory!"));
+                                teamHasWon = true;
+                            }
+                        }
+                        tally[tsp.Index] = false;
                     }
                 }
+                else tally[tsp.Index] = true;
             }
         }
-        private void OnCommand(CommandEventArgs e)
+        private void Recycle(CommandArgs e)
         {
-            if (command == null)
+            if (e.Message.Length > 8)
             {
-                Commands.ChatCommands.Add(command = new Command("teamset.admin.set", PlaceTeam, new string[] { "placeteam", "removeteam" })
+                string cmd = e.Message.Substring(8).ToLower();
+                if (cmd.Contains("type"))
                 {
-                    HelpText = "For placing or removing players from teams."
-                });
-                Commands.ChatCommands.Add(command = new Command("teamset.join", JoinTeam, new string[] { "jointeam" })
+                    Stored.splr[e.Player.Index].flag = false;
+                    Item item = Stored.splr[e.Player.Index].getItem = Main.item[Item.NewItem(0, 0, 1, 1, TypeValue(e.Player.Index))];
+                    e.Player.SendInfoMessage(string.Concat("Result: ", item.Name, " (use '/recycle accept' to complete action)."));
+                }
+                else if (cmd.Contains("value"))
                 {
-                    HelpText = "Allows players to join a team if they aren't on one already."
-                });
-            }
-        }
-        private void PlaceTeam(CommandArgs e)
-        {
-            string cmd = string.Empty;
-            if (e.Message.ToLower().Contains("placeteam"))
-            {
-                if ((cmd = e.Message.ToLower()).Length > 9 && e.Message.Contains(" "))
+                    Stored.splr[e.Player.Index].flag = true;
+                    Item item = Stored.splr[e.Player.Index].getItem = Main.item[Item.NewItem(0, 0, 1, 1, CopperValue(e.Player.Index))];
+                    e.Player.SendInfoMessage(string.Concat("Result: ", item.Name, " (use '/recycle accept' to complete action)."));
+                }
+                else if (cmd.Contains("accept") && Stored.splr[e.Player.Index].getItem != null)
                 {
-                    for (int i = 0; i < Main.player.Length; i++)
+                    bool flag = Stored.splr[e.Player.Index].flag;
+                    int min = 10,
+                        max = 40;
+                    for (int i = min; i < max; i++)
                     {
-                        var player = Main.player[i];
-                        if (player.active)
+                        var item = Main.player[e.Player.Index].inventory[i];
+                        if (item.type >= 0 && (item.createTile > 0 && !flag || item.createTile > 0 && item.value > 0 && flag))
                         {
-                            string name = player.name.ToLower();
-                            if (cmd.ToLower().Contains(name))
+                            if (Stored.splr[e.Player.Index].getItem != null)
                             {
-                                string preserveCase = cmd.Substring(cmd.IndexOf(" ") + 1, name.Length);
-                                string sub = cmd.Substring(cmd.IndexOf(" ") + 1, name.Length).ToLower();
-                                if (sub == name)
-                                {
-                                    string team = cmd.Substring(cmd.LastIndexOf(" ") + 1).ToLower();
-                                    int t = GetTeamIndex(team);
-                                    if (t > 0 || int.TryParse(team, out t))
-                                    {
-                                        int get = 0;
-                                        if ((get = GetPlayerTeam(name)) == 0)
-                                        {
-                                            if (SetPlayerTeam(name, t))
-                                            {
-                                                e.Player.SendSuccessMessage(string.Concat(preserveCase, " is now on team ", Teams[t], "."));
-                                            }
-                                            else
-                                            {
-                                                e.Player.SendErrorMessage(string.Concat(Teams[t], " might be already full."));
-                                            }
-                                        }
-                                        else 
-                                        {
-                                            e.Player.SendErrorMessage(string.Concat(preserveCase, " is already on ", Teams[get], ". Using /removeteam [name] will remove the player from their team."));
-                                        }
-                                    }
-                                }
+                                Item stored = Stored.splr[e.Player.Index].getItem;
+                                e.Player.GiveItem(stored.type, stored.Name, 32, 48, Math.Max(stored.maxStack / 4, 1), stored.prefix); 
+                                Stored.splr[e.Player.Index].getItem = null;
+                                InvData(ref item, e.Player.Index, i);
                             }
                         }
                     }
                 }
             }
-            else if (e.Message.Contains("removeteam"))
+            else
             {
-                if ((cmd = e.Message).Length > 10 && e.Message.Contains(" "))
+                e.Player.SendInfoMessage("The recycle sub commands are 'type', 'value', and 'accept'.");
+            }
+        }
+        private void TeamDropOpt(CommandArgs e)
+        {
+            string cmd = e.Message.Substring(9);
+            if (cmd.Contains("event"))
+            {
+                Event = !Event;
+                e.Player.SendSuccessMessage("The banner mode for events and point tallying has been [" + (Event ? "enabled" : "disabled") + "].");
+                setting.WriteValue("event", Event.ToString());
+                return;
+            }
+            else if (cmd.Contains("minbanner") && cmd.Length > 10)
+            {
+                int n = 0;
+                int.TryParse(cmd.Substring(cmd.LastIndexOf(' ') + 1), out n);
+                minBanners = n;
+                e.Player.SendSuccessMessage(string.Concat("Minimum banners set to [", minBanners, "], meaning goal is [", PointGoal, "] points, and esimated finish time is [", Math.Round(EstMaxTime / 24f, 2) * 4f, " days]."));
+                setting.WriteValue("minimum", minBanners.ToString());
+                string winner;
+                if ((winner = setting.GetValue("winner")) != "0")
                 {
-                    string name = string.Empty;
-                    if (RemoveFromTeam(name = cmd.Substring(cmd.IndexOf(" ") + 1)))
-                    {
-                        e.Player.SendSuccessMessage(string.Concat(name, " has been removed from their team."));
-                    }
-                    else
-                    {
-                        e.Player.SendErrorMessage(string.Concat(name, " might not be on a team, or their is no player by this name."));
-                    }
+                    teamHasWon = false;
+                    setting.WriteValue("winner", "0");
+                    e.Player.SendSuccessMessage(string.Concat(winner, " victory has been remoked until next banner turn in."));
+                }
+                return;
+            }
+            else if (cmd.Contains("toggle"))
+            {
+                enabled = !enabled;
+                e.Player.SendSuccessMessage("Banners dropping for team's monster counts is [" + (enabled ? "enabled" : "disabled") + "].");
+                return;
+            }
+            e.Player.SendInfoMessage("Commands are: [event | minbanner | toggle].");
+        }
+        private void BannerTally(CommandArgs e)
+        {
+            if (e.Message.StartsWith("bannerscore"))
+            {
+                if (e.Message.Length <= 12)
+                {
+                     e.Player.SendInfoMessage("/bannerscore [Red | Green | Blue | Yellow | Pink] Team");
+                     return;
+                }
+                string team = e.Message.Substring(12);
+                Block block;
+                if (data.BlockExists(team))
+                {
+                    block = data.GetBlock(team);
+                    e.Player.SendInfoMessage(string.Concat(team, " points total is ", block.GetValue("score"), "."));
                 }
                 else
                 {
-                    e.Player.SendErrorMessage(string.Concat("Try /removeteam [name]."));
+                    e.Player.SendErrorMessage("Try again with the color of the team.");
                 }
+                return;
             }
-        }
-        private void JoinTeam(CommandArgs e)
-        {
-            string cmd = string.Empty;
-            int index = 0;
-            bool success = false;
-            foreach (string t in Teams)
+            if (!tally[e.Player.Index])
             {
-                cmd = e.Message.Substring(9);
-                int.TryParse(cmd, out index);
-                if (GetPlayerTeam(e.Player.Name) == 0)
+                if (autoTurnIn)
                 {
-                    if (cmd.ToLower() == t.ToLower())
-                        success = SetPlayerTeam(e.Player.Name, GetTeamIndex(cmd));
-                    else if (index != 0 && index == GetTeamIndex(t))
-                    {
-                        success = SetPlayerTeam(e.Player.Name, index);
-                    }
-                    if (success)
-                    {
-                        e.Player.SendSuccessMessage(string.Concat("Joining ", t, " has succeeded."));
-                    }
+                    e.Player.SendErrorMessage("The process is automatic meaning using this command is unnecessary.");
+                    return;
+                }
+                tally[e.Player.Index] = true;
+                e.Player.SendSuccessMessage("Enabled. Find your way to the banner location to tally points.");
+                return;
+            }
+            e.Player.SendInfoMessage("Commands: /bannerscore [Red | Green | Blue | Yellow | Pink] Team" + (autoTurnIn ? "\n/bannergive" : "."));
+        }
+
+        private void InvData(ref Item item, int who, int slot)
+        {
+            item.type = 0;
+            item.SetDefaults();
+            NetMessage.SendData((int)PacketTypes.PlayerSlot, -1, -1, NetworkText.FromLiteral(item.Name), who, slot, item.prefix);
+            NetMessage.SendData((int)PacketTypes.PlayerSlot, who, -1, NetworkText.FromLiteral(item.Name), who, slot, item.prefix);
+            TShock.Players[who].SendData(PacketTypes.PlayerSlot, item.Name, who, slot, item.prefix);
+        }
+        private int TypeValue(int who)
+        {
+            int min = 10,
+                max = 40,
+                items = 0,
+                total = 0;
+            float weight = 1f;
+            for (int i = min; i < max; i++)
+            {
+                var item = Main.player[who].inventory[i];
+                if (item.type != 0 && item.createTile > 0)
+                {
+                    if (item.Name.ToLower().Contains("banner"))
+                        weight *= ItemWeight(item.type) + 1;
                     else
                     {
-                        e.Player.SendErrorMessage(string.Concat(t, " might be full."));
+                        total += item.type;
+                        items++;
                     }
                 }
             }
+            TShock.Players[who].SendInfoMessage("type: " + (int)Math.Min((total / Math.Max(1, items)) * weight, ItemID.MusicBoxSandstorm));
+            return (int)Math.Min((total / Math.Max(1, items)) * weight, ItemID.MusicBoxSandstorm);
         }
-        private int GetTeamIndex(string team)
+        private int CopperValue(int who, int ceiling = ItemID.MusicBoxSandstorm)
         {
-            for (int j = 0; j < Teams.Length; j++)
+            int min = 10,
+                max = 40,
+                items = 0,
+                total = 0;
+            float weight = 1f;
+            for (int i = min; i < max; i++)
             {
-                if (Teams[j].ToLower().Contains(team.ToLower()))
-                    return j;
-            }
-            return 0;
-        }
-        private void SetTeam(int who, int team)
-        {
-            Main.player[who].team = team;
-            TShock.Players[who].SetTeam(team);
-            NetMessage.SendData((int)PacketTypes.PlayerTeam, -1, -1, null, who, team);
-            NetMessage.SendData((int)PacketTypes.PlayerTeam, who, -1, null, who, team);
-            TShock.Players[who].SendData(PacketTypes.PlayerTeam, "", who, team);
-        }
-        private int GetPlayerTeam(string name)
-        {
-            for (int i = 0; i < Teams.Length; i++)
-            {
-                var block = data.GetBlock(Teams[i]);
-                foreach (string t in block.Contents)
+                var item = Main.player[who].inventory[i];
+                if (item.type != 0 && item.GetStoreValue() > 0 && item.createTile > 0)
                 {
-                    if (!string.IsNullOrWhiteSpace(t))
+                    if (item.Name.ToLower().Contains("banner"))
+                        weight *= ItemWeight(item.type) + 1;
+                    else
                     {
-                        if (block.Value(t).ToLower() == name.ToLower())
-                        {
-                            return i;
-                        }
+                        total += item.GetStoreValue();
+                        items++;
                     }
                 }
             }
-            return 0;
+            return (int)Math.Min((total / Math.Max(1, items)) * weight / Math.Max(1, (Item.gold / 5)), ceiling);
         }
-        private bool SetPlayerTeam(string name, int team)
+        private float ItemWeight(int type, int itemFloor = ItemID.AnkhBanner, int ceiling = ItemID.MusicBoxSandstorm)
         {
-            var block = data.GetBlock(Teams[team]);
-            foreach (string t in block.Contents)
+            return (type - itemFloor) / (ceiling - itemFloor);
+        }
+        private int BannerValue(int type, int stack = 1, float floor = ItemID.AnglerFishBanner, float ceiling = ItemID.TumbleweedBanner)
+        {
+            return (int)(Math.Max((type + 1f - floor) / (ceiling - floor), 0.01f) * 100f / 0.90f) * stack;
+        }
+        private void MessageAll(string message)
+        {
+            foreach (var tsp in TShock.Players) 
             {
-                if (!string.IsNullOrWhiteSpace(t))
+                if (tsp != null && tsp.TPlayer.active)
+                    tsp.SendMessage(message, 100, 255, 100);
+            }
+        }
+        private void MessageTeam(string message, int team)
+        {
+            foreach (var tsp in TShock.Players) 
+            {
+                if (tsp != null && tsp.TPlayer.active && tsp.Team == team)
+                    tsp.SendMessage(message, 100, 255, 100);
+            }
+        }
+
+        private class Stored : SHPlayer
+        {
+            public bool flag = false;
+            public Item getItem;
+            public static Stored[] splr = new Stored[256];
+        }
+        private int TeamPoints(int team, int value = 1)
+        {
+            var block = data.GetBlock(teams[team]);
+            foreach (string k in block.Keys())
+            {
+                if (k == "score")
                 {
-                    if (block.Value(t) == Empty)
-                    {
-                        RemoveFromTeam(name);
-                        block.WriteValue(block.Key(t), name);
-                        SetTeam(FromName(name).whoAmI, team);
-                        return true;
-                    }
+                    return block.IncreaseValue(k, value);
                 }
             }
-            return false;
-        }
-        private bool RemoveFromTeam(string name)
-        {
-            for (int i = 0; i < Teams.Length; i++)
-            {
-                var block = data.GetBlock(Teams[i]);
-                foreach (string t in block.Contents)
-                {
-                    if (!string.IsNullOrWhiteSpace(t))
-                    {
-                        if (block.Value(t).ToLower() == name.ToLower())
-                        {
-                            block.WriteValue(block.Key(t), Empty);
-                            SetTeam(FromName(name).whoAmI, 0);
-                            return true;
-                        }
-                    }
-                }
-            }
-            return false;
-        }
-        private Player FromName(string name)
-        {
-            for (int i = 0; i < Main.player.Length; i++)
-            {
-                if (Main.player[i].name.ToLower() == name.ToLower())
-                    return Main.player[i];
-            }
-            return Main.player[255];
+            return value;
         }
     }
 }
