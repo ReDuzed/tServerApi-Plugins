@@ -1,12 +1,14 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using Terraria;
 using Terraria.Localization;
 using TShockAPI;
 using TShockAPI.Hooks;
 using TerrariaApi.Server;
 using RUDD;
+using RUDD.Dotnet;
 
 namespace saferegion
 {
@@ -16,17 +18,16 @@ namespace saferegion
         private Vector2 
             leftPoint = Vector2.Zero, 
             rightPoint = Vector2.Zero;
-        private List<Region> region = new List<Region>();
+        private IList<Region> region = new List<Region>();
         private bool await1, await2;
         private int who = 255;
         private List<SHPlayer> shp = new List<SHPlayer>();
         private int oldCount, regionCount;
-        private Command remove = null;
         private Command regions = null;
         private const string config = "config\\region_config_";
-        private string realConfig = config;
-        private bool pvpRegions;
+        private bool pvpRegions = true;
         private const bool checkBoss = true;
+        private DataStore data;
         public override string Name
         {
             get { return "Safe Regions"; }
@@ -60,6 +61,7 @@ namespace saferegion
         {
             if (disposing)
             {
+                data.WriteToFile();
                 ServerApi.Hooks.ServerCommand.Deregister(this, OnCommand);
                 ServerApi.Hooks.NetGetData.Deregister(this, OnGetData);
                 ServerApi.Hooks.ServerJoin.Deregister(this, OnJoin);
@@ -119,26 +121,25 @@ namespace saferegion
                 {
                     if (r.Equals(null))
                         continue;
+                    
+                    int z = 0;
+                    bool pvp = false;
+                    bool heal = false;
+                    Block block;
+                    if (data.BlockExists(r.name))
+                    {
+                        block = data.GetBlock(r.name);
+                        z = int.Parse(block.GetValue("z"));
+                        pvp = bool.Parse(block.GetValue("pvp"));
+                        heal = bool.Parse(block.GetValue("heal"));
+                    }
+                    else 
+                    {
+                        continue;
+                    }
                     Player player = Main.player[p.who];
                     bool contains = r.Contains(player.position.X, player.position.Y);
-                    if (pvpRegions)
-                    {
-                        if (contains) 
-                        { 
-                            if (!p.reserved)
-                            {
-                                TogglePvp(p.who, false);
-                                p.reserved = true;
-                            }
-                            break;
-                        }
-                        else
-                        {
-                            TogglePvp(p.who, true);
-                            p.reserved = false;
-                        }
-                    }
-                    if (contains && !bossActive)
+                    if (contains && !bossActive && heal)
                     {
                         if (player.statLife != p.oldLife)
                         {
@@ -154,6 +155,21 @@ namespace saferegion
                         }
                         else p.healed = false;
                     }
+                    if (pvpRegions)
+                    {
+                        if (!contains)
+                            continue; 
+                        if (z > 0)
+                        {
+                            TogglePvp(p.who, false);
+                            break;
+                        }
+                        else if (z == 0 && pvp)
+                        {
+                            TogglePvp(p.who, true);
+                            break;
+                        }
+                    }
                 }
             }
             oldCount = shp.Count;
@@ -162,11 +178,11 @@ namespace saferegion
         {
             if (!Commands.ChatCommands.Contains(regions))
             {
-                Commands.ChatCommands.Add(remove = new Command("saferegion.admin.remove", ShRemove, "shremove")
+                Commands.ChatCommands.Add(new Command("saferegion.admin.remove", ShRemove, "shremove")
                 {
                     HelpText = "Causes removal of safe region by name or index"
                 });
-                Commands.ChatCommands.Add(regions = new Command("saferegion.admin.regions", SafeRegion, new string[] { "shset1", "shset2", "shmake", "shreset", "shlist", "pvpregion" }) 
+                Commands.ChatCommands.Add(regions = new Command("saferegion.admin.regions", SafeRegion, new string[] { "sr" }) 
                 {
                     HelpText = Name + ": Modifies the safe region parameters"
                 });
@@ -232,119 +248,203 @@ namespace saferegion
         }
         private void SafeRegion(CommandArgs e)
         {
-            string command = e.Message.Contains(" ") ? e.Message.Substring(0, e.Message.IndexOf(" ")) : e.Message;
-            switch (command)
+            if (e.Message.Length < 5)
             {
-                case "shset1":
-                    if (e.Message.Contains("set1") && !e.Message.Contains("2"))
+                e.Player.SendInfoMessage("[SafeRegion] Commands:\n   set1   set2   make <help> | <name> <z>\n   reset   list   pvpopt\n   pvp <name> <true|false>   z <name> <z>");
+                return;
+            }
+            string command = e.Message.Contains(" ") ? e.Message.Substring(3) : e.Message;
+            if (command.Contains("set1"))
+            {
+                if (e.Message.Contains("set1") && !e.Message.Contains("2"))
+                {
+                    e.Player.SendInfoMessage("Mine at a tile to set the first corner" + (await2 ? " (reset set2)" : "."));
+                    if (await2)
+                        await2 = false;
+                    await1 = true;
+                    who = e.Player.Index;
+                    return;
+                }
+            }
+            else if (command.Contains("set2"))
+            {
+                if (e.Message.Contains("set2") && !e.Message.Contains("1"))
+                {
+                    e.Player.SendInfoMessage("Mine at a tile to set the second corner" + (await1 ? " (reset set1)" : "."));
+                    if (await1)
+                        await1 = false;
+                    await2 = true;
+                    who = e.Player.Index;
+                }
+            }
+            else if (command.Contains("make"))
+            {
+                if (e.Message.Contains("help"))
+                {
+                    e.Player.SendErrorMessage("Please provide parameters for the safe region:\n    shmake <name> <z>");
+                    return;
+                }
+                if (leftPoint.X == 0 || rightPoint.X == 0)
+                {
+                    e.Player.SendErrorMessage("Region points not set correctly.");
+                    return;
+                }
+                string name = e.Message.Substring(10);
+                if (name.Contains(" "))
+                {
+                    name = name.Substring(0, name.IndexOf(" "));
+                }
+                string coord = e.Message.Substring(e.Message.LastIndexOf(" ") + 1);
+                int z = 0;
+                int.TryParse(coord, out z);
+                e.Player.SendSuccessMessage("[SafeRegion] " + name + " has been made at " + z + " z axis.");
+                region.Add(new Region(name, leftPoint, rightPoint, false, z));
+                WriteRegion(leftPoint, rightPoint, name.ToLower(), z, false, false);
+                leftPoint = Vector2.Zero;
+                rightPoint = Vector2.Zero;
+                e.Player.SendInfoMessage("Points 1 and 2 have been unset.");
+            }
+            else if (command.Contains("pvp"))
+            {
+                for (int i = 0; i < region.Count; i++)
+                {
+                    Region r = region[i];
+                    if (command.ToLower().Contains(r.name.ToLower()))
                     {
-                        e.Player.SendInfoMessage("Mine at a tile to set the first corner" + (await2 ? " (reset set2)" : "."));
-                        if (await2)
-                            await2 = false;
-                        await1 = true;
-                        who = e.Player.Index;
+                        string cmd = command.Substring(command.LastIndexOf(" ") + 1);
+                        bool status;
+                        bool.TryParse(cmd, out status);
+                        r.nonPvP = !status;
+                        Block block = data.GetBlock(r.name.ToLower());
+                        block.WriteValue("pvp", status.ToString());
+                        e.Player.SendSuccessMessage(string.Concat("Region ", r.name, " set to PvP: ", status, "."));
                         return;
                     }
-                    break;
-                case "shset2":
-                    if (e.Message.Contains("set2") && !e.Message.Contains("1"))
+                }
+                e.Player.SendErrorMessage("No region exists with this name.");
+            }
+            else if (command.Contains("heal"))
+            {
+                for (int i = 0; i < region.Count; i++)
+                {
+                    Region r = region[i];
+                    if (command.ToLower().Contains(r.name.ToLower()))
                     {
-                        e.Player.SendInfoMessage("Mine at a tile to set the second corner" + (await1 ? " (reset set1)" : "."));
-                        if (await1)
-                            await1 = false;
-                        await2 = true;
-                        who = e.Player.Index;
-                    }
-                    break;
-                case "shmake":
-                    if (e.Message.Length <= 7)
-                    {
-                        e.Player.SendErrorMessage("Please provide a name for the safe region.");
+                        string cmd = command.Substring(command.LastIndexOf(" ") + 1);
+                        bool status;
+                        bool.TryParse(cmd, out status);
+                        r.reserved = status;
+                        Block block = data.GetBlock(r.name.ToLower());
+                        block.WriteValue("heal", status.ToString());
+                        e.Player.SendSuccessMessage(string.Concat("Region ", r.name, " set to heal: ", status, "."));
                         return;
                     }
-                    if (leftPoint.Equals(Vector2.Zero) || rightPoint.Equals(Vector2.Zero))
+                }
+                e.Player.SendErrorMessage("No region exists with this name.");
+            }
+            else if (command.Contains("z"))
+            {
+                string Z = e.Message.Substring(e.Message.LastIndexOf(" ") + 1);
+                int z = 0;
+                int.TryParse(Z, out z);
+                for (int i = 0; i < region.Count; i++)
+                {
+                    Region r = region[i];
+                    if (command.ToLower().Contains(r.name.ToLower()))
+                    {
+                        Block block = data.GetBlock(r.name.ToLower());
+                        block.WriteValue("z", z.ToString());
+                        e.Player.SendSuccessMessage(string.Concat("Region ", r.name, " set to z: ", z, "."));
                         return;
-                    string name = e.Message.Substring(7);
+                    }
+                }
+                e.Player.SendErrorMessage("No region exists with this name.");
+            }
+            else if (command.Contains("reset"))
+            {
+                leftPoint = Vector2.Zero;
+                rightPoint = Vector2.Zero;
+                e.Player.SendInfoMessage("Points 1 and 2 have been unset.");
+            }
+            else if (command.Contains("list"))
+            {
+                string list = string.Empty;
+                if (region.Count > 0)
+                {
                     foreach (Region r in region)
-                    {
-                        if (name == r.name)
-                        {
-                            e.Player.SendErrorMessage("Safe region " + name + " already exists.");
-                            return;
-                        }
-                    }
-                    region.Add(new Region(name, leftPoint, rightPoint, true));
-                    e.Player.SendSuccessMessage("Safe region " + name + " has been made.");
-                    WriteRegion(leftPoint, rightPoint, name);
-                    goto case "shreset";
-                case "shreset":
-                    leftPoint = Vector2.Zero;
-                    rightPoint = Vector2.Zero;
-                    e.Player.SendInfoMessage("Points 1 and 2 have been unset.");
-                    break;
-                case "shlist":
-                    string list = string.Empty;
-                    if (region.Count > 0)
-                    {
-                        foreach (Region r in region)
-                            list += r.name + " ";
-                        e.Player.SendSuccessMessage(list);
-                    }
-                    break;
-                case "pvpregion":
-                    pvpRegions = !pvpRegions;
-                    e.Player.SendSuccessMessage("Regions disabling PvP has been " + (pvpRegions ? "enabled" : "disabled") + ".");
-                    break;
-                default:
-                    break;                    
+                        list += r.name + " ";
+                    e.Player.SendSuccessMessage("[Safe Regions] " + list);
+                }
+            }
+            else if (command.Contains("pvpopt"))
+            {
+                pvpRegions = !pvpRegions;
+                e.Player.SendSuccessMessage("Regions disabling PvP has been " + (pvpRegions ? "enabled" : "disabled") + ".");                    
             }
         }
         private void OnPostInit(EventArgs e)
         {
-            realConfig = config;
-            realConfig += string.Concat(Main.worldName, ".ini").Replace(' ', '_');
+            data = new DataStore("config\\safe_regions_" + Main.worldName);
+            if (!data.BlockExists("Header"))
+            {
+                var array = new string[64];
+                for (int i = 0; i < 64; i++)
+                    array[i] = i.ToString();
+                data.NewBlock(array, "Header");
+            }
             ReadRegions();
         }
         private void ReadRegions()
         {
-            if (!File.Exists(realConfig))
+            if (data.BlockExists("Header"))
             {
-                var file = File.Create(realConfig);
-                file.Close();
-                file.Dispose();
-            }
-            string[] lines = null;
-            using (StreamReader sr = new StreamReader(realConfig))
-                lines = sr.ReadToEnd().Split('\n');
-            if (lines.Length > 1)
-            {
-                float   x1 = 0f,
-                        y1 = 0f, 
-                        x2 = 0f, 
-                        y2 = 0f;
-                for (int i = 0; i < lines.Length - 2; i += 3)
+                Block block = data.GetBlock("Header");
+                for (int i = 0; i < 64; i++)
                 {
-                    float.TryParse(lines[i + 1].Substring(0, lines[i + 1].IndexOf(' ')), out x1);
-                    float.TryParse(lines[i + 1].Substring(lines[i + 1].IndexOf(' ') + 1), out y1);
-                    float.TryParse(lines[i + 2].Substring(0, lines[i + 2].IndexOf(' ')), out x2);
-                    float.TryParse(lines[i + 2].Substring(lines[i + 2].IndexOf(' ') + 1), out y2);
-                    region.Add(new Region()
+                    string name = block.GetValue(i.ToString()).ToLower();
+                    if (data.BlockExists(name))
                     {
-                        name = lines[i],
-                        point1 = new Vector2(x1, y1),
-                        point2 = new Vector2(x2, y2)
-                    });
+                        Block content = data.GetBlock(name.ToLower());
+                        float   x1 = float.Parse(content.GetValue("pos1").Split(';')[0]),
+                                y1 = float.Parse(content.GetValue("pos1").Split(';')[1]), 
+                                x2 = float.Parse(content.GetValue("pos2").Split(';')[0]), 
+                                y2 = float.Parse(content.GetValue("pos2").Split(';')[1]);
+                        int     zAxis = int.Parse(content.GetValue("z"));
+                        bool    pvp = bool.Parse(content.GetValue("pvp")),
+                                heal = bool.Parse(content.GetValue("heal"));
+                        region.Add(new Region()
+                        {
+                            name = name,
+                            point1 = new Vector2(x1, y1),
+                            point2 = new Vector2(x2, y2),
+                            z = zAxis,
+                            nonPvP = pvp,
+                            reserved = heal
+                        });
+                    }
                 }
             }
         }
-        private void WriteRegion(Vector2 vec1, Vector2 vec2, string name)
+        private void WriteRegion(Vector2 vec1, Vector2 vec2, string name, int z, bool pvp, bool heal)
         {
-            using (StreamWriter sw = new StreamWriter(realConfig, true))
+            Block block;
+            if (!data.BlockExists(name.ToLower()))
             {
-                sw.NewLine = "\n";
-                sw.WriteLine(name);
-                sw.WriteLine(vec1.X + " " + vec1.Y);
-                sw.WriteLine(vec2.X + " " + vec2.Y);
+                Block header = data.GetBlock("Header");
+                for (int i = 0; i < header.Contents.Length; i++)
+                {
+                    if (header.GetValue(i.ToString()) == "0")
+                    {
+                        header.WriteValue(i.ToString(), name.ToLower());
+                        break;
+                    }
+                }
+                block = data.NewBlock(new string[] { "pos1", "pos2", "z", "pvp", "heal" }, name.ToLower());
+                block.WriteValue("pos1", string.Concat(vec1.X,";",vec1.Y));
+                block.WriteValue("pos2", string.Concat(vec2.X,";",vec2.Y));
+                block.WriteValue("z", z.ToString());
+                block.WriteValue("pvp", pvp.ToString());
+                block.WriteValue("heal", heal.ToString());
             }
         }
         private void TogglePvp(int who, bool enabled)
