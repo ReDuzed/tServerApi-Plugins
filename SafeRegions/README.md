@@ -1,6 +1,6 @@
 # Safe Regions
-Designates areas marked by the user to be regions where players auto-heal if their health isn't at maximum.
+Designates areas marked by the user to be regions where PvP is forced off or on using z levels and typical area designating.
 
-Permissions are: ``saferegion.admin.regions``
-
-Admin commands: ``/shremove``,  ``/shset1``, ``/shset2``, ``/shmake``, ``/shreset``, ``/shlist``, ``/pvpregion``
+```
+saferegion.admin.regions    /sr (lists all available commands in game/server)
+saferegion.admin.remove     /shremove <name>```
