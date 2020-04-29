@@ -90,6 +90,9 @@ namespace banner
         private string winningTeam;
         private bool teamHasWon;
         private bool once;
+        private int bannerQuest; 
+        private string questName;
+        private bool quest = false;
         private void StartData()
         {
             data = new DataStore(string.Concat("config\\", "banner_data_", Main.worldName));
@@ -110,12 +113,14 @@ namespace banner
                 bool.TryParse(setting.GetValue("event"), out Event);
                 int.TryParse(setting.GetValue("minimum"), out minBanners);
                 winningTeam = setting.GetValue("winner");
+                bool.TryParse(setting.GetValue("teamdrops"), out enabled);
+                bool.TryParse(setting.GetValue("quest"), out quest);
             }
             else
             {
                 setting = data.NewBlock(new string[] 
                 {
-                    "region", "auto", "event", "minimum", "winner", "first"
+                    "region", "auto", "event", "minimum", "winner", "first", "teamdrops", "quest"
                 }, "settings");
             }
         }
@@ -126,6 +131,7 @@ namespace banner
             ServerApi.Hooks.NpcKilled.Register(this, OnNpcKilled);
             ServerApi.Hooks.GameUpdate.Register(this, OnUpdate);
             ServerApi.Hooks.ServerCommand.Register(this, CommandPopulate);
+            ServerApi.Hooks.NetGetData.Register(this, OnGetData);
         }
         protected override void Dispose(bool disposing)
         {
@@ -135,19 +141,50 @@ namespace banner
                 ServerApi.Hooks.NpcKilled.Deregister(this, OnNpcKilled);
                 ServerApi.Hooks.GameUpdate.Deregister(this, OnUpdate);
                 ServerApi.Hooks.ServerCommand.Deregister(this, CommandPopulate);
+                ServerApi.Hooks.NetGetData.Deregister(this, OnGetData);
             }
             base.Dispose(disposing);
         }
+        private void OnGetData(GetDataEventArgs e)
+        {
+            if (!e.Handled)
+            {
+                using (BinaryReader br = new BinaryReader(new MemoryStream(e.Msg.readBuffer, e.Index, e.Length)))
+                {
+                    if (e.MsgID == PacketTypes.NpcKillCount)
+                    {
+                        short type = br.ReadInt16();
+                        int count = br.ReadInt32(); 
+                    }
+                    if (e.MsgID == PacketTypes.WorldInfo)
+                    {
+                        const byte  day = 1,
+                                    bloodMoon = 2, 
+                                    eclipse = 4;
+                        int time = br.ReadInt32();
+                        byte dayInfo = br.ReadByte();
+                    }
+                }
+            }
+        }
         private void OnNpcKilled(NpcKilledEventArgs e)
         {
+            Player closest = Main.player[e.npc.FindClosestPlayer()];
+            if (quest && bannerQuest != 0 && bannerQuest == e.npc.type)
+            {
+                if (Main.rand.NextDouble() >= 0.90f)
+                {
+                    TShock.Players[closest.whoAmI].GiveItem(Item.BannerToItem(Item.NPCtoBanner(e.npc.BannerID())), "", closest.width, closest.height, 1);
+                    TShock.Players[closest.whoAmI].SendInfoMessage(string.Concat("Extra ", questName, " banner has dropped."));
+                }
+            }
             if (!enabled)
                 return;
-            Player closest = Main.player[e.npc.FindClosestPlayer()];
             var info = data.GetBlock(teams[closest.team]);
             int val = info.IncreaseValue(e.npc.type.ToString(), 1);
             if (val % 50 == 0 && val != 0)
             {
-                TShock.Players[closest.whoAmI].GiveItem(e.npc.BannerID(), "", closest.width, closest.height, 1);
+                TShock.Players[closest.whoAmI].GiveItem(Item.BannerToItem(Item.NPCtoBanner(e.npc.BannerID())), "", closest.width, closest.height, 1);
                 MessageAll(string.Concat(teams[closest.team], " has defeated ", val, " ", e.npc.FullName, "!"));
             }
         }
@@ -175,10 +212,34 @@ namespace banner
                 {
                     HelpText = "Grants permission for players to check point goal"
                 });
+                Commands.ChatCommands.Add(new Command("banner.tally", BannerQuest, new string[] { "bannerquest" })
+                {
+                    HelpText = "Checks which NPC is part of the time cycle's quest"
+                });
+                Commands.ChatCommands.Add(new Command("banner.admin.quest", BannerQuestToggle, new string[] { "togglequest" })
+                {
+                    HelpText = "Toggles quest banners function"
+                });
                 Commands.ChatCommands.Add(command = new Command("banner.tally", BannerTally, new string[] { "bannergive" })
                 {
                     HelpText = "Grants permission for players to turn in banners"
                 });  
+            }
+        }
+        private void BannerQuestToggle(CommandArgs e)
+        {
+            e.Player.SendSuccessMessage(string.Concat("[Quest] ", quest = !quest, " NPC quest banners."));
+            setting.WriteValue("quest", quest.ToString());
+        }
+        private void BannerQuest(CommandArgs e)
+        {
+            if (questName != null && questName.Length > 2)
+            {
+                e.Player.SendSuccessMessage(string.Concat("[Quest] ", questName, " NPC has a rare chance to drop its banner upon death."));
+            }
+            else 
+            {
+                e.Player.SendSuccessMessage("[Quest] No NPC banner chosen for today.");
             }
         }
         private void BannerGoal(CommandArgs e)
@@ -205,6 +266,14 @@ namespace banner
         }
         private void OnUpdate(EventArgs e)
         {
+            if ((int)Main.time % 39600 == 0)
+            {
+                bannerQuest = Main.rand.Next(1, Main.npcTexture.Length);
+                int npc = NPC.NewNPC(0, 0, bannerQuest);
+                questName = Main.npc[npc].TypeName;
+                bannerQuest = Main.npc[npc].type;
+                TSPlayer.All.SendInfoMessage(string.Concat("[Quest] ", questName, " NPC has a rare chance to drop its banner upon death."));
+            }
             if (!once)
             {
                 StartData();
@@ -333,6 +402,7 @@ namespace banner
             {
                 enabled = !enabled;
                 e.Player.SendSuccessMessage("Banners dropping for team's monster counts is [" + (enabled ? "enabled" : "disabled") + "].");
+                setting.WriteValue("teamdrops", enabled.ToString());
                 return;
             }
             e.Player.SendInfoMessage("Commands are: [event | minbanner | toggle].");
