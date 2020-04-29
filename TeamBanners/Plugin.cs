@@ -233,7 +233,7 @@ namespace banner
         }
         private void BannerQuest(CommandArgs e)
         {
-            if (questName != null && questName.Length > 2)
+            if (quest && questName != null && questName.Length > 2)
             {
                 e.Player.SendSuccessMessage(string.Concat("[Quest] ", questName, " NPC has a rare chance to drop its banner upon death."));
             }
@@ -266,7 +266,7 @@ namespace banner
         }
         private void OnUpdate(EventArgs e)
         {
-            if ((int)Main.time % 39600 == 0)
+            if (quest && (int)Main.time % 39600 == 0)
             {
                 bannerQuest = Main.rand.Next(1, Main.npcTexture.Length);
                 int npc = NPC.NewNPC(0, 0, bannerQuest);
