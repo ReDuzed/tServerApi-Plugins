@@ -158,9 +158,9 @@ namespace banner
                     }
                     if (e.MsgID == PacketTypes.WorldInfo)
                     {
-                        const byte  day = 1,
-                                    bloodMoon = 2, 
-                                    eclipse = 4;
+                        //const byte  day = 1,
+                        //            bloodMoon = 2, 
+                        //            eclipse = 4;
                         int time = br.ReadInt32();
                         byte dayInfo = br.ReadByte();
                     }
