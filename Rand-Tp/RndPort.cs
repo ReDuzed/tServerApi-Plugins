@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 using Terraria;
+using Terraria.DataStructures;
 using Terraria.Localization;
 using TShockAPI;
 using TShockAPI.Hooks;
@@ -22,6 +23,9 @@ namespace rnd_tp
         private const int second = 60;
         private int copperPrice = 10000;
         private Ini ini;
+        private int[] pvpCooldown = new int[256];
+        private int maxPvp = 15;
+        private bool pvpCounter = true;
         public override string Name
         {
             get { return "Random-TP"; }
@@ -46,14 +50,16 @@ namespace rnd_tp
                 {
                     "enabled",
                     "cooldown",
-                    "goldcost"
+                    "goldcost",
+                    "pvpcounter",
+                    "pvpcooldown"
                 },
                 path = "config\\rndtp_config" + Ini.ext
             };
             if (!File.Exists(ini.path))
             {
                 Directory.CreateDirectory("config");
-                ini.WriteFile(new string[] { true.ToString(), 60.ToString(), 1.ToString() });
+                ini.WriteFile(new string[] { true.ToString(), 60.ToString(), 1.ToString(), true.ToString(), 15.ToString() });
             }
             else
             {
@@ -87,7 +93,7 @@ namespace rnd_tp
             {
                 HelpText = "Changes whether or not all users can teleport to a random location on the overworld"
             });
-            Commands.ChatCommands.Add(new Command("randport.admin.settime", SetCooldown, "cooldown")
+            Commands.ChatCommands.Add(new Command("randport.admin.set", SetCooldown, "cooldown")
             {
                 HelpText = "Permits user to change the maximum time for the cooldown (in seconds)"
             });
@@ -103,17 +109,30 @@ namespace rnd_tp
             {
                 HelpText = "Reloads from INI file"
             });
+            Commands.ChatCommands.Add(new Command("randport.admin.set", PvpCounter, "randpvp")
+            {
+                HelpText = "Toggles the PvP counter option"
+            });
+        }
+        private void PvpCounter(CommandArgs e)
+        {
+            pvpCounter = !pvpCounter;
+            e.Player.SendSuccessMessage(string.Concat("[RandomPort] Cooldown for active PvP set to: ", pvpCounter, "."));
         }
         private void ReadFile(Ini ini)
         {
-            string e = string.Empty, m = string.Empty, c = string.Empty;
+            string e = string.Empty, m = string.Empty, c = string.Empty, pvpc = string.Empty, pvpCool = string.Empty;
             var i = ini.ReadFile();
             Ini.TryParse(i[0], out e);
             Ini.TryParse(i[1], out m);
             Ini.TryParse(i[2], out c);
+            Ini.TryParse(i[3], out pvpc);
+            Ini.TryParse(i[4], out pvpCool);
             bool.TryParse(e, out enabled);
             int.TryParse(m, out maxCooldown);
             int.TryParse(c, out copperPrice);
+            bool.TryParse(pvpc, out pvpCounter);
+            int.TryParse(pvpCool, out maxPvp);
             copperPrice *= 10000;
         }
         private void AdminReload(CommandArgs e)
@@ -126,6 +145,26 @@ namespace rnd_tp
         }
         public void OnGetData(GetDataEventArgs e)
         {
+            if (!e.Handled)
+            {
+                if (pvpCounter && e.MsgID == PacketTypes.PlayerHurtV2)
+                {
+                    using (BinaryReader br = new BinaryReader(new MemoryStream(e.Msg.readBuffer, e.Index, e.Length)))
+                    {
+                        const byte pvp = 2;
+                        byte who = br.ReadByte();
+                        var reason = PlayerDeathReason.FromReader(br);
+                        short dmg = br.ReadInt16();
+                        byte dir = br.ReadByte();
+                        byte flag = br.ReadByte();
+                        if (flag == pvp)
+                        {
+                            pvpCooldown[who] = maxPvp;
+                            TShock.Players[who].SendInfoMessage(string.Concat("You cannot use /random for ", maxPvp, " seconds."));
+                        }
+                    }
+                }
+            }
         }
         private void AdminPrice(CommandArgs e)
         {
@@ -133,7 +172,6 @@ namespace rnd_tp
             {
                 string copper = e.Message.Substring(e.Message.IndexOf(" ") + 1);
                 int.TryParse(copper, out copperPrice);
-                copperPrice = Math.Max(10000, copperPrice);
                 e.Player.SendSuccessMessage("Gold cost for random-tp set to: " + copperPrice / 10000);
             }
             else
@@ -155,7 +193,7 @@ namespace rnd_tp
             }
             if (enabled) 
             {
-                if (CoinPurse.ShopItem(e.TPlayer.whoAmI, copperPrice))
+                if (pvpCooldown[user.whoAmI] == 0) 
                 {
                     position.Clear();
                     int spawnY = Main.spawnTileY - 100;
@@ -173,7 +211,7 @@ namespace rnd_tp
                 }
                 else
                 {
-                    e.Player.SendInfoMessage("It requires " + copperPrice / 10000 + " gold to teleport onto a random location the overworld.");
+                    e.Player.SendErrorMessage("[RandomPort] Cannot as PvP is still active for " + pvpCooldown[user.whoAmI] + " seconds.");
                 }
             }
         }
@@ -200,6 +238,20 @@ namespace rnd_tp
         }
         private void OnUpdate(EventArgs e)
         {
+            if (pvpCounter && (int)Main.time % 60 == 0)
+            {
+                for (int i = 0; i < pvpCooldown.Length; i++)
+                {
+                    if (pvpCooldown[i] > 0)
+                    {
+                        if (pvpCooldown[i] == 1)
+                        {
+                            TShock.Players[i].SendInfoMessage("/random is now accessible to you again.");
+                        }
+                        pvpCooldown[i]--;
+                    }
+                }
+            }
             if (update)
             {
                 foreach (User u in users)
