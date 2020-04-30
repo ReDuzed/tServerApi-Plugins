@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="dotnet">
+      <HintPath>..\dependencies\dotnet.dll</HintPath>
+    </Reference>
+    <Reference Include="Native">
+      <HintPath>..\dependencies\Native.dll</HintPath>
+    </Reference>
+    <Reference Include="OTAPI">
+      <HintPath>..\dependencies\OTAPI.dll</HintPath>
+    </Reference>
+    <Reference Include="tapi">
+      <HintPath>..\dependencies\tapi.dll</HintPath>
+    </Reference>
+    <Reference Include="TerrariaServer">
+      <HintPath>..\dependencies\TerrariaServer.exe</HintPath>
+    </Reference>
+    <Reference Include="TShockAPI">
+      <HintPath>..\dependencies\TShockAPI.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+</Project>
