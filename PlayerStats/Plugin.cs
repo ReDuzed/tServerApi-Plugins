@@ -120,9 +120,15 @@ namespace playerstats
         }
         private void ChatStats(CommandArgs e)
         {
-            string cmd = e.Message.Substring(10);
+            string cmd = e.Message;
+            if (!cmd.Contains(" "))
+            {
+                e.Player.SendErrorMessage("/viewstats <pve-d | pvp-d | k> <name>");
+                return;
+            }
+            cmd = cmd.Substring(cmd.IndexOf(" ") + 1);
             cmd = cmd.Substring(0, cmd.IndexOf(" "));
-            string param = e.Message.Substring(10 + cmd.Length + 1);
+            string param = e.Message.Substring(e.Message.LastIndexOf(" ") + 1);
             string uuid = data.GetBlock(param.ToLower()).GetValue("UUID");
             switch (cmd.ToLower())
             {
