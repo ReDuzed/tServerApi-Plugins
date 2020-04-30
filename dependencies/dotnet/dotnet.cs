@@ -8,7 +8,7 @@ namespace RUDD.Dotnet
     public class DataStore
     {
         public const string ext = ".dat";
-        private string[] array = new string[50001];
+        private string[] array = new string[400001]; //increased from 50001
         private string fileName;
         private string fileNoExt;
         internal Block[] block = new Block[501];
