@@ -20,7 +20,9 @@
         public Vector2 point1;
         public Vector2 point2;
         public bool nonPvP;
-        public Region(string name, Vector2 tl, Vector2 br, bool nonPvP = false)
+        public int z;
+        public bool reserved;
+        public Region(string name, Vector2 tl, Vector2 br, bool nonPvP = false, int z = 0, bool reserved = false)
         {
             if (br.X < tl.X || tl.Y > br.Y)
             {
@@ -34,6 +36,8 @@
             }
             this.name = name;
             this.nonPvP = nonPvP;
+            this.z = z;
+            this.reserved = reserved;
         }
         public bool Contains(float X, float Y)
         {
