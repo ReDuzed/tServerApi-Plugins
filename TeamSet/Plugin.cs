@@ -36,6 +36,7 @@ namespace teamset
         private DataStore data;
         private Command command;
         private Block setting;
+        private bool freeJoin;
         public override string Name
         {
             get { return "Team Set"; }
@@ -62,23 +63,26 @@ namespace teamset
             
             Ini ini = new Ini()
             {
-                setting = new string[] { "playersperteam", "kickonswitch" },
+                setting = new string[] { "playersperteam", "kickonswitch", "freejoin" },
                 path = "config\\team_data" + Ini.ext
             };
             int total = 0;
             if (!File.Exists(ini.path))
-                ini.WriteFile(new object[] { 8, false });
+                ini.WriteFile(new object[] { 8, false, false });
             
             string t = string.Empty;
             string kick = string.Empty;
+            string free = string.Empty;
             var file = ini.ReadFile();
             if (file.Length > 0)
             {
                 Ini.TryParse(file[0], out t);
                 Ini.TryParse(file[1], out kick);
+                Ini.TryParse(file[2], out free);
             }
             bool.TryParse(kick, out kickOnSwitch);
-            total = int.Parse(t);
+            int.TryParse(t, out total);
+            bool.TryParse(free, out freeJoin);
 
             total = Math.Max(total, 2);
             string[] Slots = new string[total];
@@ -181,7 +185,7 @@ namespace teamset
                 });
                 Commands.ChatCommands.Add(new Command("teamset.admin.group", MakeGroups, new string[] { "teamset" })
                 {
-                    HelpText = "Makes general groups for each team color."
+                    HelpText = "Modifies the associated group for the specified team color."
                 });
                 Commands.ChatCommands.Add(command = new Command("teamset.join", JoinTeam, new string[] { "jointeam" })
                 {
@@ -375,7 +379,7 @@ namespace teamset
                     {
                         success = SetPlayerTeam(e.Player.Name, index);
                     }
-                    if (success)
+                    if (success || freeJoin)
                     {
                         e.Player.SendSuccessMessage(string.Concat("Joining ", t, " has succeeded."));
                         string set = Groups[i];
