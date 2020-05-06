@@ -31,7 +31,7 @@ namespace banner
         {
             get { return MinMon * TotalNpcs / minBanners; }
         }
-        private int minBanners = 1;
+        private float minBanners = 1f;
         private float MaxBanners
         {
             get { return (PointGoal * (TotalNpcs / MaxBannerValue)) / npcPerBanner; }
@@ -111,7 +111,7 @@ namespace banner
                 region = setting.GetValue("region");
                 bool.TryParse(setting.GetValue("auto"), out autoTurnIn);
                 bool.TryParse(setting.GetValue("event"), out Event);
-                int.TryParse(setting.GetValue("minimum"), out minBanners);
+                float.TryParse(setting.GetValue("minimum"), out minBanners);
                 winningTeam = setting.GetValue("winner");
                 bool.TryParse(setting.GetValue("teamdrops"), out enabled);
                 bool.TryParse(setting.GetValue("quest"), out quest);
@@ -170,11 +170,13 @@ namespace banner
         private void OnNpcKilled(NpcKilledEventArgs e)
         {
             Player closest = Main.player[e.npc.FindClosestPlayer()];
+            int banner = 0;
             if (quest && bannerQuest != 0 && bannerQuest == e.npc.type)
             {
-                if (Main.rand.NextDouble() >= 0.90f)
+                banner = Item.BannerToItem(Item.NPCtoBanner(e.npc.BannerID()));
+                if (banner != 1614 && Main.rand.NextDouble() >= 0.90f)
                 {
-                    TShock.Players[closest.whoAmI].GiveItem(Item.BannerToItem(Item.NPCtoBanner(e.npc.BannerID())), "", closest.width, closest.height, 1);
+                    TShock.Players[closest.whoAmI].GiveItem(banner, "", closest.width, closest.height, 1);
                     TShock.Players[closest.whoAmI].SendInfoMessage(string.Concat("Extra ", questName, " banner has dropped."));
                 }
             }
@@ -184,8 +186,12 @@ namespace banner
             int val = info.IncreaseValue(e.npc.type.ToString(), 1);
             if (val % 50 == 0 && val != 0)
             {
-                TShock.Players[closest.whoAmI].GiveItem(Item.BannerToItem(Item.NPCtoBanner(e.npc.BannerID())), "", closest.width, closest.height, 1);
-                MessageAll(string.Concat(teams[closest.team], " has defeated ", val, " ", e.npc.FullName, "!"));
+                banner = Item.BannerToItem(Item.NPCtoBanner(e.npc.BannerID()));
+                if (banner != 1614)
+                {
+                    TShock.Players[closest.whoAmI].GiveItem(banner, "", closest.width, closest.height, 1);
+                    MessageAll(string.Concat(teams[closest.team], " has defeated ", val, " ", e.npc.FullName, "!"));
+                }
             }
         }
         private void CommandPopulate(EventArgs e)
@@ -384,8 +390,8 @@ namespace banner
             }
             else if (cmd.Contains("minbanner") && cmd.Length > 10)
             {
-                int n = 0;
-                int.TryParse(cmd.Substring(cmd.LastIndexOf(' ') + 1), out n);
+                float n = 0;
+                float.TryParse(cmd.Substring(cmd.LastIndexOf(' ') + 1), out n);
                 minBanners = n;
                 e.Player.SendSuccessMessage(string.Concat("Minimum banners set to [", minBanners, "], meaning goal is [", PointGoal, "] points, and esimated finish time is [", Math.Round(EstMaxTime / 24f, 2) * 4f, " days]."));
                 setting.WriteValue("minimum", minBanners.ToString());
@@ -536,7 +542,7 @@ namespace banner
             {
                 if (k == "score")
                 {
-                    return block.IncreaseValue(k, value);
+                    return block.IncreaseValue(k, value) - value;
                 }
             }
             return value;
