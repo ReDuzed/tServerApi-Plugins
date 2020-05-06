@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IO;
 using Terraria;
 using Terraria.ID;
@@ -32,7 +33,7 @@ namespace banner
         {
             get { return MinMon * TotalNpcs / minBanners; }
         }
-        private int minBanners = 1;
+        private float minBanners = 1f;
         private float MaxBanners
         {
             get { return (PointGoal * (TotalNpcs / MaxBannerValue)) / npcPerBanner; }
@@ -102,7 +103,7 @@ namespace banner
                 region = setting.GetValue("region");
                 bool.TryParse(setting.GetValue("auto"), out autoTurnIn);
                 bool.TryParse(setting.GetValue("event"), out Event);
-                int.TryParse(setting.GetValue("minimum"), out minBanners);
+                float.TryParse(setting.GetValue("minimum"), out minBanners);
                 winningTeam = setting.GetValue("winner");
                 bool.TryParse(setting.GetValue("teamdrops"), out enabled);
                 bool.TryParse(setting.GetValue("quest"), out quest);
@@ -124,6 +125,7 @@ namespace banner
             ServerApi.Hooks.GameUpdate.Register(this, OnUpdate);
             ServerApi.Hooks.ServerCommand.Register(this, CommandPopulate);
             ServerApi.Hooks.ServerJoin.Register(this, OnJoin);
+            ServerApi.Hooks.NpcSpawn.Register(this, NpcSpawn);
         }
         protected override void Dispose(bool disposing)
         {
@@ -134,8 +136,12 @@ namespace banner
                 ServerApi.Hooks.GameUpdate.Deregister(this, OnUpdate);
                 ServerApi.Hooks.ServerCommand.Deregister(this, CommandPopulate);
                 ServerApi.Hooks.ServerJoin.Deregister(this, OnJoin);
+                ServerApi.Hooks.NpcSpawn.Deregister(this, NpcSpawn);
             }
             base.Dispose(disposing);
+        }
+        private void NpcSpawn(NpcSpawnEventArgs e)
+        {
         }
         private void WriteData(string name)
         {
@@ -148,14 +154,33 @@ namespace banner
         }
         private void OnJoin(JoinEventArgs e)
         {
+            string name = TShock.Players[e.Who].Name;
+            Block block;
+            if (data.BlockExists("who"))
+            {
+                block = data.GetBlock("who");
+                string playing = block.GetValue("playing");
+                if (!playing.Contains(name))
+                {
+                    playing += ";" + name;
+                    block.WriteValue("playing", playing);
+                }
+            }
+            else
+            {
+                block = data.NewBlock(new string[] { "playing" }, "who");
+                block.WriteValue("playing", name);
+            }
             WriteData(TShock.Players[e.Who].Name.ToLower());
         }
         private void OnNpcKilled(NpcKilledEventArgs e)
         {
             Player closest = Main.player[e.npc.FindClosestPlayer()];
+            int banner = 0;
             if (quest && bannerQuest != 0 && bannerQuest == e.npc.type)
             {
-                if (Main.rand.NextDouble() >= 0.90f)
+                banner = Item.BannerToItem(Item.NPCtoBanner(e.npc.BannerID()));
+                if (banner != 1614 && Main.rand.NextDouble() >= 0.90f)
                 {
                     TShock.Players[closest.whoAmI].GiveItem(Item.BannerToItem(Item.NPCtoBanner(e.npc.BannerID())), "", closest.width, closest.height, 1);
                     TShock.Players[closest.whoAmI].SendInfoMessage(string.Concat("Extra ", questName, " banner has dropped."));
@@ -165,10 +190,14 @@ namespace banner
                 return;
             var info = data.GetBlock(closest.name.ToLower());
             int val = info.IncreaseValue(e.npc.type.ToString(), 1);
+            banner = Item.BannerToItem(Item.NPCtoBanner(e.npc.BannerID()));
             if (val % 50 == 0 && val != 0)
             {
-                TShock.Players[closest.whoAmI].GiveItem(Item.BannerToItem(Item.NPCtoBanner(e.npc.BannerID())), "", closest.width, closest.height, 1);
-                MessageAll(string.Concat(closest.name, " has defeated ", val, " ", e.npc.FullName, "!"));
+                if (banner != 1614)
+                {
+                    TShock.Players[closest.whoAmI].GiveItem(Item.BannerToItem(Item.NPCtoBanner(e.npc.BannerID())), "", closest.width, closest.height, 1);
+                    MessageAll(string.Concat(closest.name, " has defeated ", val, " ", e.npc.FullName, "!"));
+                }
             }
         }
         private void CommandPopulate(EventArgs e)
@@ -203,10 +232,109 @@ namespace banner
                 {
                     HelpText = "Toggles quest banners function"
                 });
+                Commands.ChatCommands.Add(new Command("banner.tally", LeaderBoard, new string[] { "bannerlb" })
+                {
+                    HelpText = "Displays leadboard"
+                });
+                Commands.ChatCommands.Add(new Command("banner.superadmin", FixCornerNpc, new string[] { "overridefix" })
+                {
+                    HelpText = "Command for removing any NPCs that reside in the corner of the map from auto-spawning them"
+                });
                 Commands.ChatCommands.Add(command = new Command("banner.tally", BannerTally, new string[] { "bannergive" })
                 {
                     HelpText = "Grants permission for players to turn in banners"
                 });  
+            }
+        }
+        private void FixCornerNpc(CommandArgs e)
+        {
+            int count = 0;
+            foreach (NPC npc in Main.npc)
+            {
+                if (npc.position.X < 100f && npc.position.Y < 100f)
+                {
+                    npc.active = false;
+                    npc.CheckActive();
+                    count++;
+                }
+            }
+            e.Player.SendSuccessMessage(count == 0 ? "No NPCs to remove from the top left corner!" : count + " NPCs made inactive from the top corner!");
+        }
+        private void LeaderBoard(CommandArgs e)
+        {
+            if (!e.Message.Contains(" "))
+            {
+                e.Player.SendInfoMessage("Command arguments are: <winning | total>, e.g. '/bannerlb winning'.");
+                return;
+            }
+            var content = data.GetBlock("who").GetValue("playing").Split(';');
+            if (e.Message.Contains("winning"))
+            {
+                var list = new List<string>();
+                for (int i = 0; i < content.Length; i++)
+                {
+                    if (data.BlockExists(content[i].ToLower()))
+                    {
+                        var block = data.GetBlock(content[i].ToLower());
+                        list.Add(content[i] + ";" + block.GetValue("score"));
+                    }
+                }
+                string winning = string.Empty;
+                int score = 0;
+                foreach (string s in list)
+                {
+                    if (int.Parse(s.Split(';')[1]) > score)
+                    {
+                        score = int.Parse(s.Split(';')[1]);
+                        winning = s.Split(';')[0];
+                    }
+                }
+                e.Player.SendSuccessMessage(string.Concat((winning == string.Empty ? "No one" : winning), " is the current leader in banner score", (score == 0 ? "." : " with " + score + " points.")));
+                return;
+            }
+            else if (e.Message.Contains("total"))
+            {
+                int page = 0;
+                if (!int.TryParse(e.Message.Substring(e.Message.LastIndexOf(" ") + 1), out page))
+                {
+                    e.Player.SendErrorMessage("Provide page number for leader board listing, e.g. '/bannerlb total 2'.");
+                    return;
+                }
+                var list = new List<string>();
+                for (int i = 0; i < content.Length; i++)
+                {
+                    if (data.BlockExists(content[i].ToLower()))
+                    {
+                        var block = data.GetBlock(content[i].ToLower());
+                        list.Add(content[i] + ";" + block.GetValue("score"));
+                    } 
+                }
+                page = Math.Max((page - 1), 0) * 4;
+                string[] array = list.ToArray();
+                while (true)
+                {
+                    try
+                    {
+                        if ((float)array.Length / 4 > page)
+                        {
+                            e.Player.SendInfoMessage(string.Concat("Page: ", page + 1, "/", (array.Length < 4 ? 1 : array.Length / 4 + (array.Length % 4))));
+                            for (int i = page * 4; i < page * 4 + 4; i++)
+                            {
+                                if (i < array.Length)
+                                {
+                                    var split = array[i].Split(';');
+                                    e.Player.SendSuccessMessage(string.Concat(split[0], ": ", split[1]));
+                                }
+                            }
+                            return;
+                        }
+                        page--;
+                    }
+                    catch
+                    {
+                        return;
+                    }
+                }
             }
         }
         private void BannerQuestToggle(CommandArgs e)
@@ -256,6 +384,8 @@ namespace banner
                 questName = Main.npc[npc].TypeName;
                 bannerQuest = Main.npc[npc].type;
                 TSPlayer.All.SendInfoMessage(string.Concat("[Quest] ", questName, " NPC has a rare chance to drop its banner upon death."));
+                Main.npc[npc].active = false;
+                Main.npc[npc].CheckActive();
             }
             if (!Event)
                 return;
@@ -365,8 +495,8 @@ namespace banner
             }
             else if (cmd.Contains("minbanner") && cmd.Length > 10)
             {
-                int n = 0;
-                int.TryParse(cmd.Substring(cmd.LastIndexOf(' ') + 1), out n);
+                float n = 0;
+                float.TryParse(cmd.Substring(cmd.LastIndexOf(' ') + 1), out n);
                 minBanners = n;
                 e.Player.SendSuccessMessage(string.Concat("Minimum banners set to [", minBanners, "], meaning goal is [", PointGoal, "] points, and esimated finish time is [", Math.Round(EstMaxTime / 24f, 2) * 4f, " days]."));
                 setting.WriteValue("minimum", minBanners.ToString());
@@ -520,7 +650,7 @@ namespace banner
             {
                 if (k == "score")
                 {
-                    return block.IncreaseValue(k, value);
+                    return block.IncreaseValue(k, value) - value;
                 }
             }
             return value;
