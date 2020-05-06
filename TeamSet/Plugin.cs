@@ -371,7 +371,7 @@ namespace teamset
                 string t = Teams[i];
                 cmd = e.Message.Substring(9);
                 int.TryParse(cmd, out index);
-                if (GetPlayerTeam(e.Player.Name) == 0)
+                if (GetPlayerTeam(e.Player.Name) == 0 || freeJoin)
                 {
                     if (t.ToLower().Contains(cmd.ToLower()))
                         success = SetPlayerTeam(e.Player.Name, GetTeamIndex(cmd));
@@ -379,7 +379,7 @@ namespace teamset
                     {
                         success = SetPlayerTeam(e.Player.Name, index);
                     }
-                    if (success || freeJoin)
+                    if (success)
                     {
                         e.Player.SendSuccessMessage(string.Concat("Joining ", t, " has succeeded."));
                         string set = Groups[i];
