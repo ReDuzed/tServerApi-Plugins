@@ -131,11 +131,11 @@ namespace playershop
                 {
                     using (BinaryReader br = new BinaryReader(new MemoryStream(e.Msg.readBuffer, e.Index, e.Length)))
                     {
-                        short cID = br.ReadInt16();
+                        int cID = br.ReadInt16();
                         byte slot = br.ReadByte();
-                        short stack = br.ReadInt16();
+                        int stack = br.ReadInt16();
                         byte prefix = br.ReadByte();
-                        short itemID = br.ReadInt16();
+                        int itemID = br.ReadInt16();
                         foreach (ShopChest sc in shop)
                         {
                             if (sc != null)
@@ -170,6 +170,7 @@ namespace playershop
                                                             active[player.whoAmI].invalid.netDefaults(sc.contents[slot].type);
                                                             active[player.whoAmI].invalid.stack = sc.contents[slot].stack;
                                                             active[player.whoAmI].invalid.prefix = sc.contents[slot].prefix;
+                                                            Main.item[itemID].netDefaults(0);
                                                             TShock.Players[player.whoAmI].SendInfoMessage(string.Concat("This item requires ", value, " copper."));
                                                             justBought[player.whoAmI] = true;
                                                             resetContents[sc.index2] = true;
