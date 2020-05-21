@@ -137,7 +137,7 @@ namespace RUDD.Terraria
                 }
                 var tsp = TShock.Players[who];
                 foreach (int ct in coinTypes)
-                    tsp.GiveItem(ct, "", 32, 48, (int)a.GetCurrency(ct));
+                    tsp.GiveItem(ct, (int)a.GetCurrency(ct));
                 return true;
             }
             return false;
