@@ -20,7 +20,7 @@
       <HintPath>..\dependencies\Native.dll</HintPath>
     </Reference>
     <Reference Include="OTAPI">
-      <HintPath>..\..\tServerApi-Plugins\dependencies\OTAPI.dll</HintPath>
+      <HintPath>..\dependencies\OTAPI.dll</HintPath>
     </Reference>
     <Reference Include="tapi">
       <HintPath>..\dependencies\tapi.dll</HintPath>

@@ -5,10 +5,10 @@ using System.Linq;
 using Terraria;
 using Terraria.ID;
 using Terraria.Localization;
-using Terraria.World.Generation;
 using TShockAPI;
 using TShockAPI.DB;
 using TShockAPI.Hooks;
+using TShockAPI.Net;
 using TerrariaApi;
 using TerrariaApi.Server;
 using RUDD;
@@ -23,13 +23,16 @@ namespace banner
         private DataStore data;
         private Block user; 
         private const int tileSize = 16;
+        private bool deedDrain;
+        private bool debuffDeed;
+        private bool[] deedEntered = new bool[256];
         public override string Name
         {
             get { return "Town Deeds"; }
         }
         public override Version Version
         {
-            get { return new Version(0, 1); }
+            get { return new Version(1, 0, 0, 0); }
         }
         public override string Author
         {
@@ -60,6 +63,7 @@ namespace banner
             ServerApi.Hooks.GameUpdate.Register(this, OnUpdate);
             ServerApi.Hooks.ServerJoin.Register(this, OnJoin);
             ServerApi.Hooks.GameInitialize.Register(this, OnInit);
+            ServerApi.Hooks.ServerLeave.Register(this, OnLeave);
         }
         protected override void Dispose(bool disposing)
         {
@@ -69,6 +73,7 @@ namespace banner
                 ServerApi.Hooks.GameUpdate.Deregister(this, OnUpdate);
                 ServerApi.Hooks.ServerJoin.Deregister(this, OnJoin);
                 ServerApi.Hooks.GameInitialize.Deregister(this, OnInit);
+                ServerApi.Hooks.ServerLeave.Deregister(this, OnLeave);
             }
             base.Dispose(disposing);
         }
@@ -89,7 +94,75 @@ namespace banner
                 AllowServer = false,
                 HelpText = "Grants data regarding the player's deed."
             });
+            Commands.ChatCommands.Add(new Command("towndeed.admin", ForceDisband, "forcedisband")
+            {
+                AllowServer = true,
+                HelpText = "Grants moderation of deeds by allowing for forcing their disbanding."
+            });
+            Commands.ChatCommands.Add(new Command("towndeed.admin", delegate(CommandArgs a)
+            {
+                deedDrain = !deedDrain;
+                a.Player.SendSuccessMessage("Enemy players invading player deeds cause deed drain: [" + deedDrain + "].");
+            }, "draindeed")
+            {
+                AllowServer = true,
+                HelpText = "Switches the flag for player deed draining from other players."
+            });
+            Commands.ChatCommands.Add(new Command("towndeed.admin", delegate(CommandArgs a)
+            {
+                debuffDeed = !debuffDeed;
+                a.Player.SendSuccessMessage("Deeds giving players debuffs: [" + debuffDeed + "].");
+            }, "debuffdeed")
+            {
+                AllowServer = true,
+                HelpText = "Switches the flag gobally for deed debuffs."
+            });
         } 
+        private void OnLeave(LeaveEventArgs e)
+        {
+            deedEntered[e.Who] = false;
+        }
+        private void ForceDisband(CommandArgs e)
+        {
+            if (e.Message.Contains(" "))
+            {
+                string name = e.Message.Substring(e.Message.LastIndexOf("!") + 1);
+                string user = e.Message.Substring("forcedisband".Length + name.Length + 1);
+                Block block;
+                if (data.BlockExists(user))
+                {
+                    block = data.GetBlock(user);
+                    if (block.GetValue("name").Substring(user.Length + 3) != name)
+                    {
+                        e.Player.SendErrorMessage("The deed's suffix needs to match the name input.");
+                        return;
+                    }
+                    string[] s = block.GetValue("token").Split(';');
+                    Vector2 token = new Vector2(float.Parse(s[0]), float.Parse(s[1]));
+                    if (bool.Parse(block.GetValue("deed")))
+                    {
+                        int upkeep = int.Parse(block.GetValue("upkeep"));
+                        for (int i = 0; i < upkeep / 10; i++)
+                        {
+                            //Int32, System.String, Int32, Int32, Int32, Int32
+                            e.Player.GiveItem(ItemID.SilverCoin, 10);
+                            //int index = Item.NewItem((int)e.TPlayer.position.X, (int)e.TPlayer.position.Y, 32, 48, ItemID.SilverCoin, 1);
+                            //e.Player.SendData(PacketTypes.ItemDrop, "", index);
+                        }
+                        MakeEmptyDeed(block);
+                        TSPlayer.All.SendSuccessMessage(string.Concat(user, " has just disbanded the deed: ", name));
+                    }
+                    else
+                    {
+                        e.Player.SendErrorMessage("There is no deed for you to disband.");
+                    }
+                }
+            }
+            else 
+            {
+                e.Player.SendErrorMessage("Use: '/disband <suffix> <user name>' instead. Note that being in the deed's proximity is necessary.");
+            }
+        }
         private void DeedInfo(CommandArgs e)
         {
             const int tenGold = 100000;
@@ -160,12 +233,16 @@ namespace banner
                     int oldSize = int.Parse(block.GetValue("size"));
                     if (int.TryParse(e.Message.Substring(e.Message.LastIndexOf(" ") + 1), out size))
                     {
-                        size = Math.Min(Math.Max(size, 10), 25);
+                        size = Math.Min(Math.Max(size, 10), 50);
                         difference = size - oldSize;
                         if (difference > 0)
                         {
                             if (CoinPurse.ShopItem(e.Player.Index, 10000 * difference))
                             {
+                                for (int i = 0; i < 4; i++)
+                                {
+                                    TShock.Regions.ResizeRegion(block.GetValue("name"), difference / 2, i);
+                                }
                                 block.WriteValue("size", size.ToString());
                                 e.Player.SendSuccessMessage(string.Concat("The deed radius has been increased to ", size, " tiles!"));
                             }
@@ -185,34 +262,13 @@ namespace banner
                     }
                     return;
                 }
-                else if (lower.Contains("guard"))
-                {
-                    e.Player.SendErrorMessage("This command is obsolete.");
-                    return;
-                    /*
-                    if (CoinPurse.ShopItem(e.Player.Index, tenGold))
-                    {
-                        bool guard = false;
-                        bool.TryParse(block.GetValue("guard"), out guard);
-                        guard = true;
-                        block.WriteValue("guard", guard.ToString());
-                        e.Player.SendSuccessMessage(string.Concat("The town guard is set to protect the premises."));
-                    }*/
-                }
                 else if (lower.Contains("alarm"))
                 {
                     bool alarm = false;
                     bool.TryParse(block.GetValue("alarm"), out alarm);
-                    if (!alarm && CoinPurse.ShopItem(e.Player.Index, tenGold))
-                    {
-                        alarm = true;
-                        block.WriteValue("alarm", alarm.ToString());
-                        e.Player.SendSuccessMessage(string.Concat("The town alarm is set to sound on invasions."));
-                    }
-                    else
-                    {
-                        e.Player.SendErrorMessage("A deed alarm " + (alarm ? "is already enabled." : "costs 10 gold."));
-                    }
+                    alarm = !alarm;
+                    block.WriteValue("alarm", alarm.ToString());
+                    e.Player.SendSuccessMessage(string.Concat("The town alarm is set to sound on invasions? [" + alarm + "]."));
                 }
                 else if (lower.Contains("honey"))
                 { 
@@ -229,74 +285,95 @@ namespace banner
                         e.Player.SendErrorMessage("This buff " + (honey ? "is already enabled." : "costs 10 gold."));
                     }
                 }
-                else if (lower.Contains("poison"))
+                if (debuffDeed)
                 {
-                    bool poison = false;
-                    bool.TryParse(block.GetValue("poison"), out poison);    
-                    if (!poison && CoinPurse.ShopItem(e.Player.Index, tenGold))
+                    if (lower.Contains("guard"))
                     {
-                        poison = true;
-                        block.WriteValue("poison", poison.ToString());
-                        e.Player.SendSuccessMessage(string.Concat("Invaders now are given the poisoned debuff when in proximity."));
+                        e.Player.SendErrorMessage("This command is obsolete.");
+                        return;
+                        /*
+                        if (CoinPurse.ShopItem(e.Player.Index, tenGold))
+                        {
+                            bool guard = false;
+                            bool.TryParse(block.GetValue("guard"), out guard);
+                            guard = true;
+                            block.WriteValue("guard", guard.ToString());
+                            e.Player.SendSuccessMessage(string.Concat("The town guard is set to protect the premises."));
+                        }*/
                     }
-                    else
+                    else if (lower.Contains("poison"))
                     {
-                        e.Player.SendErrorMessage("This debuff, applied to invaders " + (poison ? "is already enabled." : "costs 10 gold."));
+                        bool poison = false;
+                        bool.TryParse(block.GetValue("poison"), out poison);    
+                        if (!poison && CoinPurse.ShopItem(e.Player.Index, tenGold))
+                        {
+                            poison = true;
+                            block.WriteValue("poison", poison.ToString());
+                            e.Player.SendSuccessMessage(string.Concat("Invaders now are given the poisoned debuff when in proximity."));
+                        }
+                        else
+                        {
+                            e.Player.SendErrorMessage("This debuff, applied to invaders " + (poison ? "is already enabled." : "costs 10 gold."));
+                        }
+                    }
+                    else if (lower.Contains("fire"))
+                    {
+                        bool fire = false;
+                        bool.TryParse(block.GetValue("fire"), out fire);
+                        if (!fire && CoinPurse.ShopItem(e.Player.Index, tenGold))
+                        {
+                            fire = true;
+                            block.WriteValue("fire", fire.ToString());
+                            e.Player.SendSuccessMessage(string.Concat("Invaders now are given the on fire debuff when in proximity."));
+                        }
+                        else
+                        {
+                            e.Player.SendErrorMessage("This debuff, applied to invaders " + (fire ? "is already enabled." : "costs 10 gold."));
+                        }
+                    }
+                    else if (lower.Contains("ice"))
+                    {
+                        bool ice = false;
+                        bool.TryParse(block.GetValue("ice"), out ice);    
+                        if (!ice && CoinPurse.ShopItem(e.Player.Index, tenGold))
+                        {
+                            ice = true;
+                            block.WriteValue("ice", ice.ToString());
+                            e.Player.SendSuccessMessage(string.Concat("Invaders now are given the frost burn debuff when in proximity."));
+                        }
+                        else
+                        {
+                            e.Player.SendErrorMessage("This debuff, applied to invaders " + (ice ? "is already enabled." : "costs 10 gold."));
+                        }
+                    }
+                    else if (lower.Contains("venom"))
+                    {
+                        bool venom = false;
+                        bool.TryParse(block.GetValue("venom"), out venom);    
+                        if (!venom && CoinPurse.ShopItem(e.Player.Index, tenGold))
+                        {
+                            venom = true;
+                            block.WriteValue("venom", venom.ToString());
+                            e.Player.SendSuccessMessage(string.Concat("Invaders now are given the venom debuff when in proximity."));
+                        }
+                        else
+                        {
+                            e.Player.SendErrorMessage("This debuff, applied to invaders " + (venom ? "is already enabled." : "costs 10 gold."));
+                        }
                     }
                 }
-                else if (lower.Contains("fire"))
+                else
                 {
-                    bool fire = false;
-                    bool.TryParse(block.GetValue("fire"), out fire);
-                    if (!fire && CoinPurse.ShopItem(e.Player.Index, tenGold))
-                    {
-                        fire = true;
-                        block.WriteValue("fire", fire.ToString());
-                        e.Player.SendSuccessMessage(string.Concat("Invaders now are given the on fire debuff when in proximity."));
-                    }
-                    else
-                    {
-                        e.Player.SendErrorMessage("This debuff, applied to invaders " + (fire ? "is already enabled." : "costs 10 gold."));
-                    }
+                    e.Player.SendInfoMessage("Deed debuffs have been disabled globally.");
                 }
-                else if (lower.Contains("ice"))
-                {
-                    bool ice = false;
-                    bool.TryParse(block.GetValue("ice"), out ice);    
-                    if (!ice && CoinPurse.ShopItem(e.Player.Index, tenGold))
-                    {
-                        ice = true;
-                        block.WriteValue("ice", ice.ToString());
-                        e.Player.SendSuccessMessage(string.Concat("Invaders now are given the frost burn debuff when in proximity."));
-                    }
-                    else
-                    {
-                        e.Player.SendErrorMessage("This debuff, applied to invaders " + (ice ? "is already enabled." : "costs 10 gold."));
-                    }
-                }
-                else if (lower.Contains("venom"))
-                {
-                    bool venom = false;
-                    bool.TryParse(block.GetValue("venom"), out venom);    
-                    if (!venom && CoinPurse.ShopItem(e.Player.Index, tenGold))
-                    {
-                        venom = true;
-                        block.WriteValue("venom", venom.ToString());
-                        e.Player.SendSuccessMessage(string.Concat("Invaders now are given the venom debuff when in proximity."));
-                    }
-                    else
-                    {
-                        e.Player.SendErrorMessage("This debuff, applied to invaders " + (venom ? "is already enabled." : "costs 10 gold."));
-                    }
-                }
-                else if (lower.Contains("upkeep"))
+                if (lower.Contains("upkeep"))
                 {
                     int upkeep = int.Parse(block.GetValue("upkeep"));
-                    int difference = (tenGold - upkeep) / 100;
+                    int difference = (tenGold - upkeep);
                     int spent = 0;
                     if (lower.Contains("info"))
                     {
-                        e.Player.SendInfoMessage(string.Concat("Upkeep is at ", upkeep / 100, " silver with the missing margin being ", difference, " silver which can be repaid."));
+                        e.Player.SendInfoMessage(string.Concat("Upkeep is at ", upkeep, " copper with the missing margin being ", difference, " copper which can be repaid."));
                         return;
                     }
                     if (lower.Contains(" ") && lower.Contains("add"))
@@ -317,6 +394,7 @@ namespace banner
                                         spent += 1;
                                     }
                                 }
+                                data.GetBlock(GetName(e.Player.IP)).IncreaseValue("upkeep", spent * 100);
                                 e.Player.SendSuccessMessage(string.Concat(parse, " silver in total spent on increasing upkeep."));
                             }
                         }
@@ -358,15 +436,15 @@ namespace banner
                         if (e.TPlayer.Distance(new Microsoft.Xna.Framework.Vector2(token.X * tileSize, token.Y * tileSize)) < int.Parse(block.GetValue("size")) * 16)
                         {
                             int upkeep = int.Parse(block.GetValue("upkeep"));
-                            for (int i = 0; i < upkeep / 100; i++)
+                            for (int i = 0; i < upkeep / 10; i++)
                             {
-                                e.Player.GiveItem(ItemID.SilverCoin, "Silver Coin", 32, 48, 1);
+                                //Int32, System.String, Int32, Int32, Int32, Int32
+                                e.Player.GiveItem(ItemID.SilverCoin, 10);
+                                //int index = Item.NewItem((int)e.TPlayer.position.X, (int)e.TPlayer.position.Y, 32, 48, ItemID.SilverCoin, 1);
+                                //e.Player.SendData(PacketTypes.ItemDrop, "", index);
                             }
-                            block.WriteValue("deed", false.ToString());
-                            block.WriteValue("name", "0");
-                            block.WriteValue("size", "0");
-                            block.WriteValue("token", "0");
-                            block.WriteValue("upkeep", "0");
+                            TShock.Regions.DeleteRegion(block.GetValue("name"));
+                            MakeEmptyDeed(block);
                             TSPlayer.All.SendSuccessMessage(string.Concat(user, " has just disbanded the deed: ", name));
                         }
                         else
@@ -387,6 +465,29 @@ namespace banner
         }
         private void StartTown(CommandArgs e)
         {
+            string[] array = data.GetBlock("users").GetValue("names").Split(';');
+            for (int i = 1; i < array.Length; i++)
+            {
+                Block block;
+                if (array[i] != "0" && data.BlockExists(array[i]))
+                {
+                    block = data.GetBlock(array[i]);
+                    string token;
+                    if ((token = block.GetValue("token")).Contains(";"))
+                    {
+                        string[] v2 = token.Split(';');
+                        if (v2.Length > 0)
+                        {
+                            Microsoft.Xna.Framework.Vector2 xnaV2 = new Microsoft.Xna.Framework.Vector2(float.Parse(v2[0]) * 16f, float.Parse(v2[1]) * 16f);
+                            if (e.TPlayer.Distance(xnaV2) < (int.Parse(block.GetValue("size")) + 50) * 16)
+                            {
+                                e.Player.SendErrorMessage("There is a deed planted too near to where this spot is. Try another location.");
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
             if (e.Message.Contains(" "))
             {
                 string name = e.Message.Substring(e.Message.IndexOf(" ") + 1);
@@ -403,7 +504,8 @@ namespace banner
                             if (CoinPurse.ShopItem(e.Player.Index, 100000))
                             {
                                 string title = string.Concat(user, "'s ", name);
-                                TShock.Regions.AddRegion((int)region[0].X / 16 - 4, (int)region[0].Y / 16 - 4, 6, 8, title, user, Main.worldID.ToString(), 4);
+                                TShock.Regions.AddRegion((int)region[0].X / 16 - 10, (int)region[0].Y / 16 - 10, 20, 20, title, user, Main.worldID.ToString(), 4);
+                                TShock.Regions.SetRegionState(title, true);
                                 deed = true;
                                 block.WriteValue("deed", true.ToString());
                                 block.WriteValue("name", title);
@@ -520,13 +622,18 @@ namespace banner
                         int m = 0;
                         bool.TryParse(block.GetValue("deed"), out deed);
                         int.TryParse(block.GetValue("upkeep"), out m);
-                        if (deed && m > 0)
+                        if (deed && m >= 0)
                         {
                             int size = int.Parse(block.GetValue("size"));
                             string[] s = block.GetValue("token").Split(';');
                             Vector2 token = new Vector2(float.Parse(s[0]), float.Parse(s[1]));
                             if (player.Distance(new Microsoft.Xna.Framework.Vector2(token.X * tileSize, token.Y * tileSize)) < size * 16)
                             {
+                                if (!deedEntered[i])
+                                {
+                                    TShock.Players[i].SendInfoMessage(string.Concat("You have just entered the deed: ", block.GetValue("name"), ".", block.GetValue("name").ToLower().Contains(TShock.Players[i].Name.ToLower()) ? "\nUse /mydeed for deed management." : ""));
+                                    deedEntered[i] = true;
+                                }
                                 bool guard, alarm, poison, fire, ice, venom;
                                 bool.TryParse(block.GetValue("alarm"), out alarm);
                                 bool.TryParse(block.GetValue("guard"), out guard);
@@ -555,26 +662,31 @@ namespace banner
                                         break;
                                     }
                                 }
-                                if (guard)
+                                if (debuffDeed)
                                 {
-                                    Wiring.TripWire((int)token.X / 16 - 1, (int)token.Y / 16 - 2, 1, 2);
+                                    if (guard)
+                                    {
+                                        Wiring.TripWire((int)token.X / 16 - 1, (int)token.Y / 16 - 2, 1, 2);
+                                    }
+                                    if (poison)
+                                    {
+                                        TShock.Players[i].SetBuff(BuffID.Poisoned, 900, true);
+                                    }
+                                    if (fire)
+                                    {
+                                        TShock.Players[i].SetBuff(BuffID.OnFire, 900, true);
+                                    }
+                                    if (ice)
+                                    {
+                                        TShock.Players[i].SetBuff(BuffID.Frostburn, 900, true);
+                                    }
+                                    if (venom)
+                                    {
+                                        TShock.Players[i].SetBuff(BuffID.Venom, 900, true);
+                                    }
                                 }
-                                if (poison)
-                                {
-                                    TShock.Players[i].SetBuff(BuffID.Poisoned, 900, true);
-                                }
-                                if (fire)
-                                {
-                                    TShock.Players[i].SetBuff(BuffID.OnFire, 900, true);
-                                }
-                                if (ice)
-                                {
-                                    TShock.Players[i].SetBuff(BuffID.Frostburn, 900, true);
-                                }
-                                if (venom)
-                                {
-                                    TShock.Players[i].SetBuff(BuffID.Venom, 900, true);
-                                }
+                                if (!deedDrain)
+                                    continue;
                                 int whoAmI = 255;
                                 for (int n = 0; n < Main.player.Length; n++)
                                 {
@@ -589,26 +701,37 @@ namespace banner
                                 if (TShock.Players[i].TPlayer.Distance(new Microsoft.Xna.Framework.Vector2(token.X * tileSize, token.Y * tileSize)) < (size / 5) * 16)
                                 {
                                     int upkeep = 99;
+                                    const int seconds = 5;
+                                    int frames = 60 * seconds;
+                                    int minutes = frames * 60;
                                     if (int.TryParse(block.GetValue("upkeep"), out upkeep))
                                     {
                                         if (i != whoAmI)
                                         {
-                                            upkeep = Math.Max(block.IncreaseValue("upkeep", -500) - 500, 0);
+                                            for (int n = 0; n < 10; n++)
+                                            {
+                                                upkeep = Math.Max(block.IncreaseValue("upkeep", -500) - 500, 0);
+                                                if (upkeep % 3000 == 0 || upkeep <= 0)
+                                                {
+                                                    TShock.Players[i].SendSuccessMessage(string.Concat("The deed's upkeep has been drained to ", upkeep, "."));
+                                                }
+                                            }
+                                        }
+                                        if (upkeep <= 0)
+                                        {
+                                            string plr = string.Empty;
+                                            MakeEmptyDeed(block);
+                                            plr = Main.player[whoAmI].name;
+                                            TShock.Players[whoAmI].SendMessage(string.Concat(TShock.Players[i].Name, " has reduced your deed's upkeep to zero therefore disbanding it."), Microsoft.Xna.Framework.Color.Firebrick);
+                                            TSPlayer.All.SendInfoMessage(string.Concat(TShock.Players[i].Name, " has just disbanded ", plr, "'s deed."));
                                         }
                                     }
-                                    if (upkeep <= 0)
-                                    {
-                                        string plr = string.Empty;;
-                                        block.WriteValue("deed", false.ToString());
-                                        plr = Main.player[whoAmI].name;
-                                        TShock.Players[whoAmI].SendMessage(string.Concat(TShock.Players[i].Name, " has reduced your deed's upkeep to zero therefore disbanding it."), Microsoft.Xna.Framework.Color.Firebrick);
-                                        TSPlayer.All.SendInfoMessage(string.Concat(TShock.Players[i].Name, " has just disbanded ", plr, "'s deed."));
-                                    }
-                                    if (i != whoAmI && upkeep % 2000 == 0)
-                                    {
-                                        TShock.Players[i].SendSuccessMessage(string.Concat("The deed's upkeep has been drained to ", upkeep, "."));
-                                    }
                                 }
+                            }
+                            else if (deedEntered[i])
+                            {
+                                TShock.Players[i].SendInfoMessage(string.Concat("You have just left the deed: ", block.GetValue("name"), "."));
+                                deedEntered[i] = false;
                             }
                         }
                         else
@@ -618,6 +741,20 @@ namespace banner
                     }
                 }
             }
+        }
+        private void MakeEmptyDeed(Block block)
+        {
+            block.WriteValue("deed", false.ToString());
+            block.WriteValue("name", "0");
+            block.WriteValue("size", "0");
+            block.WriteValue("token", "0");
+            block.WriteValue("upkeep", "0");
+            block.WriteValue("alarm", "0");
+            block.WriteValue("honey", "0");
+            block.WriteValue("poison", "0");
+            block.WriteValue("fire", "0");
+            block.WriteValue("ice", "0");
+            block.WriteValue("venom", "0");
         }
         private Vector2[] StatueProximity(Player player, int size = 10)
         {
