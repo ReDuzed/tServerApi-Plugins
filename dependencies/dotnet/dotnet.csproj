@@ -5,10 +5,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Remove="AssemblyInfo.cs" />
-  </ItemGroup>
-
-  <ItemGroup>
     <None Remove="README.md" />
   </ItemGroup>
 

@@ -412,6 +412,20 @@ namespace RUDD.Dotnet
         public Ini()
         {
         }
+        public void AddSetting(string text)
+        {
+            if (text == null)
+                return;
+            for (int n = 0; n < setting.Length; n++)
+                setting[n] += "=";
+            if (!File.Exists(path))
+                MakeFile();
+            using (StreamWriter sw = new StreamWriter(path, true))
+            {
+                sw.NewLine = "\n";
+                sw.WriteLine(text + "=" + "0");
+            }
+        }
         private void MakeFile()
         {
             var file = File.Create(path);
