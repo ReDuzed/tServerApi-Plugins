@@ -6,9 +6,6 @@ using Terraria;
 using Terraria.ID;
 using Terraria.Localization;
 using TShockAPI;
-using TShockAPI.DB;
-using TShockAPI.Hooks;
-using TerrariaApi;
 using TerrariaApi.Server;
 using RUDD.Dotnet;
 
@@ -23,7 +20,7 @@ namespace ItemClasses
         }
         public override Version Version
         {
-            get { return new Version(0, 1); }
+            get { return new Version(1, 0, 1); }
         }
         public override string Author
         {
@@ -31,7 +28,7 @@ namespace ItemClasses
         }
         public override string Description
         {
-            get { return ""; }
+            get { return "Players can choose between any number of predefined classes."; }
         }
         private DataStore data;
         private Ini ini;
@@ -41,17 +38,14 @@ namespace ItemClasses
             Melee = 2,
             Mage = 3,
             SSCReset = 4;
-        class ClassID
+        partial class ClassID
         {
             public const string None = "None", Ranged = "Ranged", Melee = "Melee", Mage = "Mage";
-            public static string[] Array
-            {
-                get { return new string[] { None, Ranged, Melee, Mage }; }
-            }
+            public static string[] Array = new string[4];
         }
         private bool[] choseClass = new bool[256];
         private string[] itemSet = new string[4];
-        private bool removeClass, canChoose;
+        private bool removeClass, canChoose = true;
         private const string Roster = "Roster", Key = "names";
         public Plugin(Main game) : base(game)
         {
@@ -77,6 +71,11 @@ namespace ItemClasses
         public override void Initialize()
         {
             data = new DataStore("config\\player_class_data");
+            ini = new Ini()
+            {
+                setting = new string[] { "SSCReset" },
+                path = "config\\class_data" + Ini.ext
+            };
             Reload(new CommandArgs("", TSPlayer.All, null));
             ServerApi.Hooks.ServerJoin.Register(this, OnJoin);
             ServerApi.Hooks.ServerLeave.Register(this, OnLeave);
@@ -103,6 +102,11 @@ namespace ItemClasses
                 e.Player.SendErrorMessage("SSC is not enabled, therefore class choosing is also not enabled.");
                 return;
             }
+            string classes = "";
+            for (int i = 0; i < ClassID.Array.Length; i++)
+            {
+                classes += ClassID.Array[i] + " ";
+            }
             if (e.Message.Contains(" "))
             {
                 string userName = e.TPlayer.name;
@@ -114,7 +118,7 @@ namespace ItemClasses
                 }
                 if (ClassSet(param) == -1)
                 {
-                    e.Player.SendErrorMessage("There is no such class. Try '/chooseclass <none | ranged | melee | mage>' instead.");
+                    e.Player.SendErrorMessage("There is no such class. Try '/chooseclass [c/FFFF00:'" + classes.TrimEnd(' ') + "'] instead.");
                     return;
                 }
                 for (int i = 0; i < NetItem.InventorySlots; i++)
@@ -130,10 +134,70 @@ namespace ItemClasses
                         for (int j = 0; j < array.Length; j++)
                         {
                             int type;
+                            #region Works | good formatting
+                            /*
+                            for (int n = 0; n < array[j].Length; n++)
+                            {
+                                if (array[j].Substring(n, 1) == "s")
+                                {
+                                    int.TryParse(array[j].Substring(n + 1), out type);
+                                    int.TryParse(array[j].Substring(0, n), out stack);
+                                    e.Player.GiveItem(type, stack);
+                                    continue;
+                                }
+                                else if (array[j].Substring(n, 1) == "p")
+                                {
+                                    int.TryParse(array[j].Substring(n + 1), out type);
+                                    int.TryParse(array[j].Substring(0, n), out prefix);
+                                    e.Player.GiveItem(type, 1, prefix);
+                                    continue;
+                                }
+                            }
+                            int.TryParse(array[j], out type);
+                            e.Player.GiveItem(type, 1);*/
+                            #endregion
+                            #region Tried & works | bad formatting
                             if (int.TryParse(array[j], out type))
                             {
+                                int stack = j + 1;
+                                if (stack < array.Length)
+                                {
+                                    if (array[stack].StartsWith("s"))
+                                    {
+                                        j++;
+                                        if (int.TryParse(array[stack].Substring(1), out stack))
+                                        {
+                                            e.Player.GiveItem(type, stack);
+                                            continue;
+                                        }
+                                        else
+                                        {
+                                            e.Player.GiveItem(type, 1);
+                                            continue;
+                                        }
+                                    }
+                                }
+                                int prefix = j + 1;
+                                if (prefix < array.Length)
+                                {
+                                    if (array[prefix].StartsWith("p"))
+                                    {
+                                        j++;
+                                        if (int.TryParse(array[prefix].Substring(1), out prefix))
+                                        {
+                                            e.Player.GiveItem(type, 1, prefix);
+                                            continue;
+                                        }
+                                        else
+                                        {   
+                                            e.Player.GiveItem(type, 1);
+                                            continue;
+                                        }
+                                    }
+                                }
                                 e.Player.GiveItem(type, 1);
                             }
+                            #endregion
                         }
                     }
                 }
@@ -141,29 +205,54 @@ namespace ItemClasses
                 e.Player.SendSuccessMessage(ClassID.Array[ClassSet(param)] + " class chosen!");
                 return;
             }
-            e.Player.SendErrorMessage("Try '/chooseclass <none | ranged | melee | mage>' instead.");
+            e.Player.SendErrorMessage("Try '/chooseclass [c/FFFF00:'" + classes.TrimEnd(' ') + "'] instead.");
         }
         
         private void Reload(CommandArgs e)
         {
-            ini = new Ini()
-            {
-                setting = new string[] { ClassID.None, ClassID.Ranged, ClassID.Melee, ClassID.Mage, "SSCReset" },
-                path = "config\\class_data" + Ini.ext
-            };
             if (!File.Exists(ini.path))
             {
-                ini.WriteFile(new string[] { "0", "0", "0", "0", "False" });            
+                ini.WriteFile(new string[] { "False" });            
+            }
+            if (e.Message.Contains(" "))
+            {
+                string cmd = e.Message.Substring(e.Message.IndexOf(" "));
+                if (cmd.Contains("add"))
+                {
+                    string sub = e.Message.Substring(e.Message.LastIndexOf(" ") + 1);
+                    ini.AddSetting(sub);
+                    e.Player.SendSuccessMessage(sub + " added to the class listing.");
+                }
             }
             string[] array = ini.ReadFile();
-            for (int i = 0; i < itemSet.Length; i++)
+            
+            //string choose = "";
+            //Ini.TryParse(array[0], out choose);
+            //bool.TryParse(choose, out canChoose);
+
+            if (array.Length <= 1)
+                return;
+            itemSet = new string[array.Length];
+            ClassID.Array = new string[itemSet.Length];
+            for (int i = 1; i < array.Length; i++)
             {
-                Ini.TryParse(array[i], out itemSet[i]);
+                if (array[i].Contains('='))
+                {
+                    Ini.TryParse(array[i], out itemSet[i - 1]);
+                    ClassID.Array[i - 1] = array[i].Substring(0, array[i].IndexOf('='));
+                }
             }
-            if (e.TPlayer.whoAmI == 255)
-                    Console.WriteLine("[PlayerClasses] Successfully reloaded the INI.");
-                else
-                    e.Player.SendSuccessMessage("[c/FF0000:PlayerClasses] Successfully reloaded the INI.");
+            try
+            {
+                if (e.TPlayer.whoAmI == 255)
+                        Console.WriteLine("[PlayerClasses] Successfully reloaded the INI.");
+                    else
+                        e.Player.SendSuccessMessage("[c/FF0000:PlayerClasses] Successfully reloaded the INI.");
+            }
+            catch
+            {
+                return;
+            }
         }
         private void ResetOption(CommandArgs e)
         {
@@ -241,6 +330,8 @@ namespace ItemClasses
         }
         private int ClassSet(string param)
         {
+            if (ClassID.Array == null || ClassID.Array.Length == 0)
+                return -1;
             for (int i = 0; i < ClassID.Array.Length; i++)
             {
                 if (param.ToLower() == ClassID.Array[i].ToLower())
