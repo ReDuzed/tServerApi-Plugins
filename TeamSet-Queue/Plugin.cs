@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Terraria;
@@ -102,6 +103,55 @@ namespace teamsetqueue
             bool.TryParse(free, out freeJoin);
             bool.TryParse(leave, out kickOnLeave);
             bool.TryParse(tspawn, out teamSpawn);
+
+            string[] Slots = new string[] {};
+            total = Math.Max(total, 2);
+            Slots = new string[total];
+            for (int i = 0; i < total; i++)
+                Slots[i] = "players" + (i + 1);
+            
+            foreach (string team in Teams)
+            {
+                if (!data.BlockExists(team))
+                    data.NewBlock(Slots, team);
+                else
+                {
+                    Block block;
+                    if ((block = data.GetBlock(team)).Contents.Length < total)
+                    {
+                        for (int i = 0; i < total; i++)
+                        {
+                            if (!block.Keys()[i].Contains(i.ToString()))
+                                block.AddItem("players" + i, "0");
+                        }
+                    }
+                }
+            }
+            string[] keys = informal;
+            if (!data.BlockExists("groups"))
+            {
+                setting = data.NewBlock(keys, "groups");
+                for (int i = 0; i < Groups.Length; i++)
+                {
+                    setting.WriteValue(keys[i], Groups[i]);
+                }
+            }
+            else
+            {
+                setting = data.GetBlock("groups");
+                for (int i = 0; i < Groups.Length; i++)
+                {
+                    setting.WriteValue(keys[i], Groups[i]);
+                }
+            }
+            if (!data.BlockExists("spawns"))
+            {
+                spawn = data.NewBlock(keys, "spawns");
+            }
+            else 
+            {
+                spawn = data.GetBlock("spawns");
+            }
         }
         
         public override void Initialize()
@@ -139,9 +189,17 @@ namespace teamsetqueue
             }
             string userName = TShock.Players[e.Who].Name;
             string list = roster.GetValue(Key);
-            if (!list.Contains(userName))
-                list += (";" + userName);
-            roster.WriteValue(Key, list);
+            if (!list.Contains(";"))
+            {
+                roster.WriteValue(Key, userName + ";");
+                return;
+            }
+            for (int i = 0; i < list.Length; i++)
+            {
+                if (list.Substring(i).StartsWith(userName))
+                    return;
+            }
+            roster.AddValue(Key, ';', userName);
         }
         private void OnLeave(LeaveEventArgs e)
         {
@@ -216,8 +274,8 @@ namespace teamsetqueue
                 });
                 Commands.ChatCommands.Add(new Command("teamset.help", delegate(CommandArgs a)
                 {
-                    a.Player.SendInfoMessage(string.Format("{0} <index | color>, {1} <name>\n{2}\n{3} automates team group creation parented to group default\n{4} <team color> <group>\n{5} <color | index>\n{6} team spawn switch\n{7} <color> places spawn at your current position\n{8} teleports to team spawn\n{9} switches player on leave being removed from team\n{10} <<1-5> <1-5> [<1-5>]...> use 2 or more team indices to autosort into said teams",
-                                            "/placeteam", "/removeteam", "/reload", "/teamgroups", "/teamset", "/jointeam", "/tspawn", "/settspawn", "/teamspawn", "/teamleavekick", "/autosort"));
+                    a.Player.SendInfoMessage(string.Format("{0} <index | color>, {1} <name>\n{2}\n{3} automates team group creation parented to group default\n{4} <team color> <group>\n{5} <color | index>\n{6} team spawn switch\n{7} <color> places spawn at your current position\n{8} teleports to team spawn\n{9} switches player on leave being removed from team\n{10} <<1-5> <1-5> [<1-5>]...> use 2 or more team indices to autosort into said teams \n{11} <reset | init <#>> Useful for expanding the maximum number of players per team.",
+                                            "/placeteam", "/removeteam", "/reload", "/teamgroups", "/teamset", "/jointeam", "/tspawn", "/settspawn", "/teamspawn", "/teamleavekick", "/autosort", "/database"));
                 }, "teamsethelp")
                 {
                     HelpText = "Toggles whether players can use /tspawn to go to team spawn locations."
@@ -273,7 +331,7 @@ namespace teamsetqueue
                     }
                     Block roster = data.GetBlock(Roster);
                     string[] list = roster.GetValue(Key).Split(';');
-                    for (int i = 1; i < list.Length; i++)
+                    for (int i = 0; i < list.Length; i++)
                     {
                         int teamIndex = 0;
                         int previous = total;
@@ -312,10 +370,13 @@ namespace teamsetqueue
             Block block = data.GetBlock(Teams[index]);
             for (int i = 0; i < array.Length; i++)
             {
-                if (block.GetValue("players" + i + 1) == "0")
+                if (block.Contents.Length < i)
                 {
-                    count = i;
-                    return false;
+                    if (block.GetValue("players" + i + 1) == "0")
+                    {
+                        count = i;
+                        return false;
+                    }
                 }
             }
             count = 0;
@@ -328,7 +389,7 @@ namespace teamsetqueue
                 string sub = e.Message.Substring(e.Message.IndexOf(" ") + 1);
                 if (sub.StartsWith("reset"))
                 {
-                    data.Dispose(true);
+                    data.Dispose(false);
                     e.Player.SendSuccessMessage("The database has been cleared. Please run [c/FF0000:/database init <max # per team>.]");
                     return;
                 }
@@ -341,7 +402,7 @@ namespace teamsetqueue
                         Slots = new string[total];
                         for (int i = 0; i < total; i++)
                             Slots[i] = "players" + (i + 1);
-                        e.Player.SendSuccessMessage("Max spots per team has been set to: [/cFFFF00: " + total + "].");
+                        e.Player.SendSuccessMessage("Max spots per team has been set to: [c/FFFF00: " + total + "].");
                     };
                     int t;
                     if (!sub.Contains(" "))
