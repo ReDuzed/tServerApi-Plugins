@@ -216,8 +216,8 @@ namespace teamsetqueue
                 });
                 Commands.ChatCommands.Add(new Command("teamset.help", delegate(CommandArgs a)
                 {
-                    a.Player.SendInfoMessage(string.Format("{0} <index | color>, {1} <name>\n{2}\n{3} automates team group creation parented to group default\n{4} <team color> <group>\n{5} <color | index>\n{6} warps to team spawn\n{7} <color> places spawn at your current position\n{8} teleports to team spawn\n{9} switches player on leave being removed from team",
-                                            "/placeteam", "/removeteam", "/reload", "/teamgroups", "/teamset", "/jointeam", "/tspawn", "/settspawn", "/teamspawn", "/teamleavekick"));
+                    a.Player.SendInfoMessage(string.Format("{0} <index | color>, {1} <name>\n{2}\n{3} automates team group creation parented to group default\n{4} <team color> <group>\n{5} <color | index>\n{6} team spawn switch\n{7} <color> places spawn at your current position\n{8} teleports to team spawn\n{9} switches player on leave being removed from team\n{10} <<1-5> <1-5> [<1-5>]...> use 2 or more team indices to autosort into said teams",
+                                            "/placeteam", "/removeteam", "/reload", "/teamgroups", "/teamset", "/jointeam", "/tspawn", "/settspawn", "/teamspawn", "/teamleavekick", "/autosort"));
                 }, "teamsethelp")
                 {
                     HelpText = "Toggles whether players can use /tspawn to go to team spawn locations."
