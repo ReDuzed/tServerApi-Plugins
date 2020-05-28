@@ -16,6 +16,9 @@
     <Reference Include="dotnet">
       <HintPath>..\dependencies\dotnet.dll</HintPath>
     </Reference>
+    <Reference Include="dotnet.extension">
+      <HintPath>..\dependencies\dotnet.extension.dll</HintPath>
+    </Reference>
     <Reference Include="Native">
       <HintPath>..\dependencies\Native.dll</HintPath>
     </Reference>

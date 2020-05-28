@@ -40,15 +40,17 @@ namespace teamsetqueue
         private const string Empty = "0";
         private bool kickOnSwitch;
         private DataStore data;
-        private Command command;
         private Block setting;
         private Block spawn;
         private bool freeJoin;
         private int total;
         private bool kickOnLeave;
         private bool teamSpawn;
+        private bool overflow;
         const string Roster = "Roster";
         const string Key = "names";
+        private bool autoAssignGroup;
+        private Vector2[] teamSpawns = new Vector2[6];
         public override string Name
         {
             get { return "Team Set Queue"; }
@@ -74,21 +76,29 @@ namespace teamsetqueue
         {
             if (!Directory.Exists("config"))
                 Directory.CreateDirectory("config");
-            
+ 
             Ini ini = new Ini()
             {
-                setting = new string[] { "playersperteam", "kickonswitch", "teamfreejoin", "kickonleave", "enableteamspawn" },
+                setting = new string[] { "playersperteam", "kickonswitch", "teamfreejoin", "kickonleave", "enableteamspawn", "teamoverflow", "autogroupassign", informal[0], informal[1], informal[2], informal[3], informal[4], informal[5] },
                 path = "config\\team_data" + Ini.ext
             };
             total = 0;
             if (!File.Exists(ini.path))
-                ini.WriteFile(new object[] { 4, false, false, false, false });
-            
+                ini.WriteFile(new object[] { 4, false, false, false, false, false, false, "0:0", "0:0", "0:0", "0:0", "0:0", "0:0" });
+
             string t = string.Empty;
             string kick = string.Empty;
             string free = string.Empty;
             string leave = string.Empty;
             string tspawn = string.Empty;
+            string overf = string.Empty;
+            string auto = string.Empty;
+            string  none = string.Empty,
+                    red = string.Empty, 
+                    green = string.Empty, 
+                    blue = string.Empty, 
+                    yellow = string.Empty, 
+                    pink = string.Empty;
             var file = ini.ReadFile();
             if (file.Length > 0)
             {
@@ -97,12 +107,47 @@ namespace teamsetqueue
                 Ini.TryParse(file[2], out free);
                 Ini.TryParse(file[3], out leave);
                 Ini.TryParse(file[4], out tspawn);
+                Ini.TryParse(file[5], out overf);
+                Ini.TryParse(file[6], out auto);
+                Ini.TryParse(file[7], out none);
+                Ini.TryParse(file[8], out red);
+                Ini.TryParse(file[9], out green);
+                Ini.TryParse(file[10], out blue);
+                Ini.TryParse(file[11], out yellow);
+                Ini.TryParse(file[12], out pink);
             }
             bool.TryParse(kick, out kickOnSwitch);
             int.TryParse(t, out total);
             bool.TryParse(free, out freeJoin);
             bool.TryParse(leave, out kickOnLeave);
             bool.TryParse(tspawn, out teamSpawn);
+            bool.TryParse(overf, out overflow);
+            bool.TryParse(auto, out autoAssignGroup);
+           
+            int noneX, noneY;
+            int redX, redY;
+            int greenX, greenY;
+            int blueX, blueY;
+            int yellowX, yellowY;
+            int pinkX, pinkY;
+            int.TryParse(none.Split(':')[0], out noneX);
+            int.TryParse(none.Split(':')[1], out noneY);
+            int.TryParse(red.Split(':')[0], out redX);
+            int.TryParse(red.Split(':')[1], out redY);
+            int.TryParse(green.Split(':')[0], out greenX);
+            int.TryParse(green.Split(':')[1], out greenY);
+            int.TryParse(blue.Split(':')[0], out blueX);
+            int.TryParse(blue.Split(':')[1], out blueY);
+            int.TryParse(yellow.Split(':')[0], out yellowX);
+            int.TryParse(yellow.Split(':')[1], out yellowY);
+            int.TryParse(pink.Split(':')[0], out pinkX);
+            int.TryParse(pink.Split(':')[1], out pinkY);
+            teamSpawns[0] = new Vector2(noneX, noneY);
+            teamSpawns[1] = new Vector2(redX, redY);
+            teamSpawns[2] = new Vector2(greenX, greenY);
+            teamSpawns[3] = new Vector2(blueX, blueY);
+            teamSpawns[4] = new Vector2(yellowX, yellowY);
+            teamSpawns[5] = new Vector2(pinkX, pinkY);
 
             string[] Slots = new string[] {};
             total = Math.Max(total, 2);
@@ -230,157 +275,197 @@ namespace teamsetqueue
         }
         private void OnInit()
         {
-            if (command == null)
+            Commands.ChatCommands.Add(new Command("teamset.admin.set", PlaceTeam, new string[] { "placeteam", "removeteam" })
             {
-                Commands.ChatCommands.Add(new Command("teamset.admin.set", PlaceTeam, new string[] { "placeteam", "removeteam" })
+                HelpText = "For placing or removing players from teams.",
+                AllowServer = false
+            });
+            Commands.ChatCommands.Add(new Command("teamset.admin", Reload, new string[] { "reload" })
+            {
+                HelpText = "Reloads settings."
+            });
+            Commands.ChatCommands.Add(new Command("teamset.admin.group", MakeGroups, new string[] { "teamgroups" })
+            {
+                HelpText = "Makes general groups for each team color."
+            });
+            Commands.ChatCommands.Add(new Command("teamset.admin.group", MakeGroups, new string[] { "teamset" })
+            {
+                HelpText = "Modifies the associated group for the specified team color."
+            });
+            Commands.ChatCommands.Add(new Command("teamset.join", JoinTeam, new string[] { "jointeam", "team" })
+            {
+                HelpText = "Allows players to join a team if they aren't on one already.",
+                AllowServer = false
+            });
+            Commands.ChatCommands.Add(new Command("teamset.tp", TeamSpawn, new string[] { "tspawn" })
+            {
+                HelpText = "Spawns player to their team-designated spawn point",
+                AllowServer = false
+            });
+            Commands.ChatCommands.Add(new Command("teamset.admin.tp", SetSpawn, new string[] { "settspawn" })
+            {
+                HelpText = "For admins to set team spawns",
+                AllowServer = false
+            });
+            Commands.ChatCommands.Add(new Command("teamset.admin", delegate(CommandArgs a)
+            {
+                teamSpawn = !teamSpawn;
+                a.Player.SendSuccessMessage("Teams being permitted to use /tspawn is [" + teamSpawn + "].");
+            }, "teamspawn")
+            {
+                HelpText = "Toggles whether players can use /tspawn to go to team spawn locations."
+            });
+            Commands.ChatCommands.Add(new Command("teamset.help", delegate(CommandArgs a)
+            {
+                a.Player.SendInfoMessage(string.Format("{0} <index | color>, {1} <name>\n{2}\n{3} automates team group creation parented to group default\n{4} <team color> <group>\n{5} <color | index>\n{6} team spawn switch\n{7} <color> places spawn at your current position\n{8} teleports to team spawn\n{9} switches player on leave being removed from team\n{10} <<1-5>,<1-5>,[<1-5>]...> use 2 or more team indices to autosort into said teams \n{11} <reset | init <#>> Useful for expanding the maximum number of players per team \n{12} <all | team | [username]> Teleport whole everyone, team, or single player to their team spawn",
+                                        "/placeteam", "/removeteam", "/reload", "/teamgroups", "/teamset", "/jointeam", "/tspawn", "/settspawn", "/teamspawn", "/teamleavekick", "/autosort", "/database", "/tpteam"));
+            }, "teamsethelp")
+            {
+                HelpText = "Toggles whether players can use /tspawn to go to team spawn locations."
+            });
+            //  Kicking a player via /kick removed them from their team with this flag set.
+            Commands.ChatCommands.Add(new Command("teamset.admin", delegate(CommandArgs a)
+            {
+                kickOnLeave = !kickOnLeave;
+                a.Player.SendSuccessMessage("Players that leave are removed from their designated team [" + kickOnLeave + "].");
+            }, "teamleavekick")
+            {
+                HelpText = "Toggles whether players leaving should kick them off their teams."
+            });
+            Commands.ChatCommands.Add(new Command("teamset.superadmin.db", MakeDataBase, "database")
+            {
+                HelpText = "Makes the database with which to store maximum player per team only to be used after the INI file is manually set up"
+            });
+            Commands.ChatCommands.Add(new Command("teamset.admin.sort", AutoSort, "autosort")
+            {
+                HelpText = "Begins automatically sorting players into the teams that have the least players through use of team indices."
+            });
+            Commands.ChatCommands.Add(new Command("teamset.admin", TeleportTeam, "tpteam")
+            {
+                HelpText = "Teleport whole team or single player using /tpteam <all | team <color> | [username]>"
+            });
+            Commands.ChatCommands.Add(new Command("teamset.admin", delegate(CommandArgs a)
+            {
+                autoAssignGroup = !autoAssignGroup;
+                a.Player.SendSuccessMessage("Automatically assigning members upon team join to group set to: [" + autoAssignGroup + "].");
+            }, "autoassign")
+            {
+                HelpText = "Flag for automatically assigning members to configured groups upon team join"
+            });
+        }
+        private void TeleportTeam(CommandArgs e)
+        {
+            if (e.Message.Contains(" "))
+            {
+                string sub = e.Message.Substring(e.Message.IndexOf(" ") + 1);
+                if (sub.StartsWith("all"))
                 {
-                    HelpText = "For placing or removing players from teams.",
-                    AllowServer = false
-                });
-                Commands.ChatCommands.Add(new Command("teamset.admin", Reload, new string[] { "reload" })
+                    foreach (TSPlayer player in TShock.Players)
+                    {
+                        if (player != null && player.Active)
+                        {
+                            var v2 = teamSpawns[GetPlayerTeam(player.Name)];
+                            player.Teleport(v2.X * 16, v2.Y * 16);
+                            player.SendInfoMessage(e.Player.Name + " has teleported you to your team spawn.");
+                        }
+                    }
+                    e.Player.SendSuccessMessage("All players have been teleported to their team spawns.");
+                }
+                else if (sub.StartsWith("team"))
                 {
-                    HelpText = "Reloads settings."
-                });
-                Commands.ChatCommands.Add(new Command("teamset.admin.group", MakeGroups, new string[] { "teamgroups" })
+                    string team = sub.Substring(sub.IndexOf(" "));
+                    int index = GetTeamIndex(team);
+                    foreach (TSPlayer player in TShock.Players)
+                    {
+                        if (player != null && player.Active)
+                        {
+                            var v2 = teamSpawns[index];
+                            player.Teleport(v2.X * 16, v2.Y * 16);
+                            player.SendInfoMessage(e.Player.Name + " has teleported you to your team spawn.");
+                        }
+                    }
+                    e.Player.SendSuccessMessage("Team " + team + " has been teleported to their team spawns.");
+                }
+                else
                 {
-                    HelpText = "Makes general groups for each team color."
-                });
-                Commands.ChatCommands.Add(new Command("teamset.admin.group", MakeGroups, new string[] { "teamset" })
-                {
-                    HelpText = "Modifies the associated group for the specified team color."
-                });
-                Commands.ChatCommands.Add(new Command("teamset.join", JoinTeam, new string[] { "jointeam" })
-                {
-                    HelpText = "Allows players to join a team if they aren't on one already.",
-                    AllowServer = false
-                });
-                Commands.ChatCommands.Add(new Command("teamset.tp", TeamSpawn, new string[] { "tspawn" })
-                {
-                    HelpText = "Spawns player to their team-designated spawn point",
-                    AllowServer = false
-                });
-                Commands.ChatCommands.Add(new Command("teamset.admin.tp", SetSpawn, new string[] { "settspawn" })
-                {
-                    HelpText = "For admins to set team spawns",
-                    AllowServer = false
-                });
-                Commands.ChatCommands.Add(new Command("teamset.admin", delegate(CommandArgs a)
-                {
-                    teamSpawn = !teamSpawn;
-                    a.Player.SendSuccessMessage("Teams being permitted to use /tspawn is [" + teamSpawn + "].");
-                }, "teamspawn")
-                {
-                    HelpText = "Toggles whether players can use /tspawn to go to team spawn locations."
-                });
-                Commands.ChatCommands.Add(new Command("teamset.help", delegate(CommandArgs a)
-                {
-                    a.Player.SendInfoMessage(string.Format("{0} <index | color>, {1} <name>\n{2}\n{3} automates team group creation parented to group default\n{4} <team color> <group>\n{5} <color | index>\n{6} team spawn switch\n{7} <color> places spawn at your current position\n{8} teleports to team spawn\n{9} switches player on leave being removed from team\n{10} <<1-5> <1-5> [<1-5>]...> use 2 or more team indices to autosort into said teams \n{11} <reset | init <#>> Useful for expanding the maximum number of players per team.",
-                                            "/placeteam", "/removeteam", "/reload", "/teamgroups", "/teamset", "/jointeam", "/tspawn", "/settspawn", "/teamspawn", "/teamleavekick", "/autosort", "/database"));
-                }, "teamsethelp")
-                {
-                    HelpText = "Toggles whether players can use /tspawn to go to team spawn locations."
-                });
-                //  Kicking a player via /kick removed them from their team with this flag set.
-                Commands.ChatCommands.Add(command = new Command("teamset.admin", delegate(CommandArgs a)
-                {
-                    kickOnLeave = !kickOnLeave;
-                    a.Player.SendSuccessMessage("Players that leave are removed from their designated team [" + kickOnLeave + "].");
-                }, "teamleavekick")
-                {
-                    HelpText = "Toggles whether players leaving should kick them off their teams."
-                });
-                Commands.ChatCommands.Add(new Command("teamset.superadmin.db", MakeDataBase, "database")
-                {
-                    HelpText = "Makes the database with which to store maximum player per team only to be used after the INI file is manually set up"
-                });
-                Commands.ChatCommands.Add(new Command("teamset.admin.sort", AutoSort, "autosort")
-                {
-                    HelpText = "Begins automatically sorting players into the teams that have the least players through use of team indices."
-                });
+                    string userName = sub;
+                    int index = 0;
+                    foreach (TSPlayer player in TShock.Players)
+                    {
+                        if (player != null && player.Active && player.Name == userName)
+                        {
+                            index = player.Team;
+                            var v2 = teamSpawns[player.Team];
+                            player.Teleport(v2.X * 16, v2.Y * 16);
+                            player.SendInfoMessage(e.Player.Name + " has teleported you to your team spawn.");
+                            break;
+                        }
+                    }
+                    e.Player.SendSuccessMessage(userName + " has been teleported to team " + Teams[index] + "'s spawn.");
+                }
             }
         }
         private void AutoSort(CommandArgs e)
         {
-            Action error = delegate(){
-                e.Player.SendErrorMessage(string.Format("Use as many team indices as you want teams to be sorted into, 1:{0}, 2:{1}, 3:{2}, 4:{3}, 5:{4}.", Teams[1], Teams[2], Teams[3], Teams[4], Teams[5]));
-            };
-            if (e.Message.Contains(" "))
+            if (e.Message.Contains(" ") && e.Message.Contains(","))
             {
-                string sub = e.Message.Substring(e.Message.IndexOf(" ") + 1);
-                if (sub.Contains(" "))
+                string[] user = data.GetBlock(Roster).GetValue(Key).Split(';');
+                
+                int[] num = new int[Teams.Length];
+                for (int k = 0; k < num.Length; k++)
+                    num[k] = -1;
+
+                string[] sub = e.Message.Substring(e.Message.IndexOf(" ") + 1).Split(',');
+                for (int i = 0; i < sub.Length; i++)
                 {
-                    int[] num = new int[6];
-                    bool[] valid = new bool[6];
-                    string[] array = sub.Split(' ');
-                    for (int i = 0; i < array.Length; i++)
+                    int index = int.Parse(sub[i]);
+                    num[index] = TeamCount(index);
+                }
+                
+                for (int n = 0; n < user.Length; n++)
+                {
+                    int index = 0;
+                    int min = total;
+                    for (int j = 0; j < num.Length; j++)
                     {
-                        int index = 0;
-                        int count = 0;
-                        if (int.TryParse(array[i], out index))
+                        if (num[j] == -1)
+                            continue;
+                        if (num[j] < min)
                         {
-                            valid[index] = true;
-                            if (!TeamFull(index, out count))
-                            {
-                                num[index] = count;
-                            }
-                        }
-                        else
-                        {
-                            error();
+                            min = num[j];
+                            index = j;
                         }
                     }
-                    Block roster = data.GetBlock(Roster);
-                    string[] list = roster.GetValue(Key).Split(';');
-                    for (int i = 0; i < list.Length; i++)
+                    TSPlayer player = null;
+                    foreach (TSPlayer p in TShock.Players)
                     {
-                        int teamIndex = 0;
-                        int previous = total;
-                        for (int j = 0; j < num.Length; j++)
+                        if (p != null && p.Active && p.Name == user[n] && p.Team == TeamID.None)
                         {
-                            if (num[j] < previous && valid[j])
-                            {
-                                previous = num[j];
-                                teamIndex = j;
-                            }
-                        }
-                        foreach (TSPlayer p in TShock.Players)
-                        {
-                            if (p != null && p.Active && p.Name == list[i])
-                            {
-                                JoinTeam(new CommandArgs("jointeam " + informal[teamIndex], p, null)); 
-                                num[teamIndex]++;
-                                break;
-                            }
+                            player = p;
+                            break;
                         }
                     }
+                    if (player != null && index != 0)
+                    {
+                        num[index]++;
+                        JoinTeam(new CommandArgs("jointeam " + informal[index], player, null));
+                        e.Player.SendInfoMessage(player.Name + " sent to " + Teams[index]);
+                    }
                 }
-                else
-                {
-                    error();
-                }
-            }
-            else
-            {
-                error();
             }
         }
-        private bool TeamFull(int index, out int count)
+        private int TeamCount(int index)
         {
-            string[] array = new string[total];
+            int count = 0;
             Block block = data.GetBlock(Teams[index]);
-            for (int i = 0; i < array.Length; i++)
+            for (int i = 1; i <= total; i++)
             {
-                if (block.Contents.Length < i)
+                if (block.GetValue("players" + i) != "0")
                 {
-                    if (block.GetValue("players" + i + 1) == "0")
-                    {
-                        count = i;
-                        return false;
-                    }
+                    count++;
                 }
             }
-            count = 0;
-            return true;
+            return count;
         }
         private void MakeDataBase(CommandArgs e)
         {
@@ -630,7 +715,7 @@ namespace teamsetqueue
                                             {
                                                 e.Player.SendSuccessMessage(string.Concat(preserveCase, " is now on team ", Teams[t], "."));
                                                 string set = Groups[t].ToLower();
-                                                if (TShock.Groups.GroupExists(set))
+                                                if (TShock.Groups.GroupExists(set) && autoAssignGroup)
                                                 {
                                                     e.Player.Group = TShock.Groups.GetGroupByName(set);
                                                     Console.WriteLine(string.Concat(e.Player.Name, " has been set to group ", set, "!"));
@@ -661,7 +746,7 @@ namespace teamsetqueue
                     {
                         e.Player.SendSuccessMessage(string.Concat(name, " has been removed from their team."));
                         string set = "default";
-                        if (TShock.Groups.GroupExists(set))
+                        if (TShock.Groups.GroupExists(set) && autoAssignGroup)
                         {
                             e.Player.Group = TShock.Groups.GetGroupByName(set);
                             Console.WriteLine(string.Concat(e.Player.Name, " has been set to group ", set, "!"));
@@ -686,7 +771,7 @@ namespace teamsetqueue
             for (int i = 0; i < Teams.Length; i++)
             {
                 string t = Teams[i];
-                cmd = e.Message.Substring(9);
+                cmd = e.Message.Substring(e.Message.IndexOf(" ") + 1);
                 int.TryParse(cmd, out index);
                 if (GetPlayerTeam(e.Player.Name) == 0 || freeJoin)
                 {
@@ -698,9 +783,10 @@ namespace teamsetqueue
                     }
                     if (success)
                     {
-                        e.Player.SendSuccessMessage(string.Concat("Joining ", t, " has succeeded."));
+                        if (!e.Message.StartsWith("team"))
+                            e.Player.SendSuccessMessage(string.Concat("Joining ", t, " has succeeded."));
                         string set = Groups[i];
-                        if (TShock.Groups.GroupExists(set))
+                        if (TShock.Groups.GroupExists(set) && autoAssignGroup)
                         {
                             e.Player.Group = TShock.Groups.GetGroupByName(set);
                             Console.WriteLine(string.Concat(e.Player.Name, " has been set to group ", set, "!"));
@@ -761,6 +847,14 @@ namespace teamsetqueue
                         return true;
                     }
                 }
+            }
+            block = data.GetBlock(Teams[team]);
+            if (overflow)
+            {
+                RemoveFromTeam(name);
+                block.AddItem("players" + block.Contents.Length + 1, name);
+                SetTeam(FromName(name).whoAmI, team);
+                return true;
             }
             return false;
         }
