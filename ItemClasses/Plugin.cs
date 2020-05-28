@@ -38,6 +38,7 @@ namespace ItemClasses
             Melee = 2,
             Mage = 3,
             SSCReset = 4;
+        private const string none = "None", red = "Red", green = "Green", blue = "Blue", yellow = "Yellow", pink = "Pink";
         partial class ClassID
         {
             public const string None = "None", Ranged = "Ranged", Melee = "Melee", Mage = "Mage";
@@ -67,18 +68,19 @@ namespace ItemClasses
                 canChoose = !canChoose;
                 e.Player.SendSuccessMessage("Players able to choose classes: [" + canChoose + "]");
             }, "canchoose") { HelpText = "" });
+            add(new Command("classes.admin.start", Start, "match"));
         }
         public override void Initialize()
         {
             data = new DataStore("config\\player_class_data");
             ini = new Ini()
             {
-                setting = new string[] { "SSCReset" },
                 path = "config\\class_data" + Ini.ext
             };
-            Reload(new CommandArgs("", TSPlayer.All, null));
+            Reload(new CommandArgs(string.Empty, TSPlayer.Server, null));
             ServerApi.Hooks.ServerJoin.Register(this, OnJoin);
             ServerApi.Hooks.ServerLeave.Register(this, OnLeave);
+            ServerApi.Hooks.GameUpdate.Register(this, OnUpdate);
         }
          protected override void Dispose(bool disposing)
         {
@@ -87,8 +89,57 @@ namespace ItemClasses
             {
                 ServerApi.Hooks.ServerJoin.Deregister(this, OnJoin);
                 ServerApi.Hooks.ServerLeave.Deregister(this, OnLeave);
+                ServerApi.Hooks.GameUpdate.Deregister(this, OnUpdate);
             }
             base.Dispose();
+        }
+        private int ticks;
+        private bool preMatchChoose;
+        private Block roster;
+        private void Start(CommandArgs e)
+        {
+            Action error = delegate()
+            {
+                e.Player.SendErrorMessage("Try using [c/FFFF00:/match class <# of seconds>] to set a countdown for players to choose a class.");
+            };
+            if (e.Message.Contains(" "))
+            {
+                string sub = e.Message.Substring(e.Message.IndexOf(" ") + 1);
+                if (sub.StartsWith("class") && sub.Contains(" "))
+                {
+                    int.TryParse(sub.Substring(sub.IndexOf(" ") + 1), out ticks);
+                    ticks = Math.Max(ticks, 60);
+                    preMatchChoose = true;
+                    TShockAPI.TSPlayer.All.SendInfoMessage("You have [c/FF00FF:" + ticks + " seconds] to choose a class before one is auto-assigned to you");
+                }
+                else
+                {
+                    error();
+                }
+            }
+            else
+            {
+                error();
+            }
+        }
+        private void OnUpdate(EventArgs e)
+        {
+            if (preMatchChoose)
+            {
+                if ((int)Main.time % 60 == 0)
+                    ticks--;
+                if (ticks < 0)
+                {
+                    foreach (TSPlayer p in TShock.Players)
+                    {
+                        if (p != null && p.Active && !p.Dead)
+                        {
+                            ChooseClass(new CommandArgs("chooseclass " + ClassID.Array[Main.rand.Next(0, ClassID.Array.Length - 1)], p, null));
+                        }
+                    }
+                    preMatchChoose = false;
+                }
+            }
         }
         private void ChooseClass(CommandArgs e)
         {
@@ -110,7 +161,7 @@ namespace ItemClasses
             if (e.Message.Contains(" "))
             {
                 string userName = e.TPlayer.name;
-                string param = e.Message.Substring(e.Message.IndexOf(" ") + 1).ToLower();
+                string param = e.Message.Substring(e.Message.IndexOf(" ") + 1).ToLower().Trim(' ');
                 if (data.GetBlock(userName).GetValue("class") != "0")
                 {
                     e.Player.SendErrorMessage("The character class designation has already occurred.");
@@ -207,14 +258,13 @@ namespace ItemClasses
             }
             e.Player.SendErrorMessage("Try '/chooseclass [c/FFFF00:'" + classes.TrimEnd(' ') + "'] instead.");
         }
-        
         private void Reload(CommandArgs e)
         {
             if (!File.Exists(ini.path))
             {
-                ini.WriteFile(new string[] { "False" });            
+                ini.WriteFile(null);            
             }
-            if (e.Message.Contains(" "))
+            if (e.Message.Length > 4 && e.Message.Contains(" "))
             {
                 string cmd = e.Message.Substring(e.Message.IndexOf(" "));
                 if (cmd.Contains("add"))
@@ -229,17 +279,17 @@ namespace ItemClasses
             //string choose = "";
             //Ini.TryParse(array[0], out choose);
             //bool.TryParse(choose, out canChoose);
-
-            if (array.Length <= 1)
+            
+            if (array.Length == 0)
                 return;
             itemSet = new string[array.Length];
             ClassID.Array = new string[itemSet.Length];
-            for (int i = 1; i < array.Length; i++)
+            for (int i = 0; i < array.Length; i++)
             {
                 if (array[i].Contains('='))
                 {
-                    Ini.TryParse(array[i], out itemSet[i - 1]);
-                    ClassID.Array[i - 1] = array[i].Substring(0, array[i].IndexOf('='));
+                    Ini.TryParse(array[i], out itemSet[i]);
+                    ClassID.Array[i] = array[i].Substring(0, array[i].IndexOf('='));
                 }
             }
             try
@@ -274,7 +324,6 @@ namespace ItemClasses
         }
         private void OnJoin(JoinEventArgs e)
         {
-            Block roster;
             if (!data.BlockExists(Roster))
             {
                 roster = data.NewBlock(new string[] { Key }, Roster);
@@ -298,6 +347,14 @@ namespace ItemClasses
                 }, userName);    
             }
         }
+        private void OnLeave(LeaveEventArgs e)
+        {
+            if (removeClass)
+            {
+                Block user = data.GetBlock(TShock.Players[e.Who].Name);
+                user.WriteValue("class", "0");
+            }
+        }
         private void ResetAll(CommandArgs e)
         {
             Block roster = data.GetBlock(Roster);
@@ -315,14 +372,6 @@ namespace ItemClasses
                 }
             }
             e.Player.SendSuccessMessage("The users:" + list + "have had their classes removed.");
-        }
-        private void OnLeave(LeaveEventArgs e)
-        {
-            if (removeClass)
-            {
-                Block user = data.GetBlock(TShock.Players[e.Who].Name);
-                user.WriteValue("class", "0");
-            }
         }
         private string Class(int index)
         {
