@@ -8,7 +8,7 @@ namespace RUDD.Dotnet
     public class DataStore
     {
         public const string ext = ".dat";
-        private string[] array = new string[50001];
+        private string[] array = new string[400001]; //increased from 50001
         private string fileName;
         private string fileNoExt;
         internal Block[] block = new Block[501];
@@ -411,6 +411,20 @@ namespace RUDD.Dotnet
         public string[] setting;
         public Ini()
         {
+        }
+        public void AddSetting(string text)
+        {
+            if (text == null)
+                return;
+            for (int n = 0; n < setting.Length; n++)
+                setting[n] += "=";
+            if (!File.Exists(path))
+                MakeFile();
+            using (StreamWriter sw = new StreamWriter(path, true))
+            {
+                sw.NewLine = "\n";
+                sw.WriteLine(text + "=" + "0");
+            }
         }
         private void MakeFile()
         {

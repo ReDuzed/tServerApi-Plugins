@@ -20,12 +20,23 @@ namespace teamset
     {
         private string[] Teams
         {
-            get { return new string[] { "None", "Red Team", "Green Team", "Blue Team", "Yellow Team", "Purple Team" }; }
+            get { return new string[] { "None", "Red Team", "Green Team", "Blue Team", "Yellow Team", "Pink Team" }; }
+        }
+        private string redTeam = "red", greenTeam = "green", blueTeam = "blue", yellowTeam = "yellow", pinkTeam = "pink";
+        private string[] Groups
+        {
+            get { return new string[] { "none", redTeam, greenTeam, blueTeam, yellowTeam, pinkTeam }; }
+        }
+        private string[] informal
+        {
+            get { return new string[] { "none", "red", "green", "blue", "yellow", "pink" }; }
         }
         private const string Empty = "0";
         private bool kickOnSwitch;
         private DataStore data;
         private Command command;
+        private Block setting;
+        private bool freeJoin;
         public override string Name
         {
             get { return "Team Set"; }
@@ -45,27 +56,33 @@ namespace teamset
         public Plugin(Main game) : base(game)
         {
         }
-        public override void Initialize()
+        private void Reload()
         {
+            if (!Directory.Exists("config"))
+                Directory.CreateDirectory("config");
+            
             Ini ini = new Ini()
             {
-                setting = new string[] { "playersperteam", "kickonswitch" },
+                setting = new string[] { "playersperteam", "kickonswitch", "freejoin" },
                 path = "config\\team_data" + Ini.ext
             };
             int total = 0;
             if (!File.Exists(ini.path))
-                ini.WriteFile(new object[] { 4, false });
+                ini.WriteFile(new object[] { 8, false, false });
             
             string t = string.Empty;
             string kick = string.Empty;
+            string free = string.Empty;
             var file = ini.ReadFile();
             if (file.Length > 0)
             {
                 Ini.TryParse(file[0], out t);
                 Ini.TryParse(file[1], out kick);
+                Ini.TryParse(file[2], out free);
             }
             bool.TryParse(kick, out kickOnSwitch);
-            total = int.Parse(t);
+            int.TryParse(t, out total);
+            bool.TryParse(free, out freeJoin);
 
             total = Math.Max(total, 2);
             string[] Slots = new string[total];
@@ -77,7 +94,40 @@ namespace teamset
             {
                 if (!data.BlockExists(team))
                     data.NewBlock(Slots, team);
+                else
+                {
+                    Block block;
+                    if ((block = data.GetBlock(team)).Contents.Length < total)
+                    {
+                        for (int i = 0; i < total; i++)
+                        {
+                            if (!block.Keys()[i].Contains(i.ToString()))
+                                block.AddItem("players" + i, "0");
+                        }
+                    }
+                }
             }
+            string[] keys = informal;
+            if (!data.BlockExists("groups"))
+            {
+                setting = data.NewBlock(keys, "groups");
+                for (int i = 0; i < Groups.Length; i++)
+                {
+                    setting.WriteValue(keys[i], Groups[i]);
+                }
+            }
+            else
+            {
+                setting = data.GetBlock("groups");
+                for (int i = 0; i < Groups.Length; i++)
+                {
+                    setting.WriteValue(keys[i], Groups[i]);
+                }
+            }
+        }
+        public override void Initialize()
+        {   
+            Reload();
             ServerApi.Hooks.ServerJoin.Register(this, OnJoin);
             ServerApi.Hooks.NetGetData.Register(this, OnGetData);
             ServerApi.Hooks.ServerCommand.Register(this, OnCommand);
@@ -121,15 +171,117 @@ namespace teamset
         {
             if (command == null)
             {
-                Commands.ChatCommands.Add(command = new Command("teamset.admin.set", PlaceTeam, new string[] { "placeteam", "removeteam" })
+                Commands.ChatCommands.Add(new Command("teamset.admin.set", PlaceTeam, new string[] { "placeteam", "removeteam" })
                 {
                     HelpText = "For placing or removing players from teams."
+                });
+                Commands.ChatCommands.Add(new Command("teamset.admin", Reload, new string[] { "reload" })
+                {
+                    HelpText = "Reloads settings."
+                });
+                Commands.ChatCommands.Add(new Command("teamset.admin.group", MakeGroups, new string[] { "teamgroups" })
+                {
+                    HelpText = "Makes general groups for each team color."
+                });
+                Commands.ChatCommands.Add(new Command("teamset.admin.group", MakeGroups, new string[] { "teamset" })
+                {
+                    HelpText = "Modifies the associated group for the specified team color."
                 });
                 Commands.ChatCommands.Add(command = new Command("teamset.join", JoinTeam, new string[] { "jointeam" })
                 {
                     HelpText = "Allows players to join a team if they aren't on one already."
                 });
             }
+        }
+        private void Reload(CommandArgs e)
+        {
+            Reload();
+            e.Player.SendSuccessMessage("[TeamSet] settings reloaded.");
+        }
+        private void MakeGroups(CommandArgs e)
+        {
+            if (e.Message.ToLower().Contains("teamset"))
+            {
+                string cmd = e.Message.Substring(7);
+                if (cmd.Contains("red"))
+                {
+                    redTeam = cmd.Substring(cmd.LastIndexOf(" ") + 1);
+                    e.Player.SendSuccessMessage("Red's group: " + redTeam);
+                }
+                else if (cmd.Contains("green"))
+                {
+                    greenTeam = cmd.Substring(cmd.LastIndexOf(" ") + 1);
+                    e.Player.SendSuccessMessage("Green's group: " + greenTeam);
+                }
+                else if (cmd.Contains("blue"))
+                {
+                    blueTeam = cmd.Substring(cmd.LastIndexOf(" ") + 1);
+                    e.Player.SendSuccessMessage("Blue's group: " + blueTeam);
+                }
+                else if (cmd.Contains("yellow"))
+                {
+                    yellowTeam = cmd.Substring(cmd.LastIndexOf(" ") + 1);
+                    e.Player.SendSuccessMessage("Yellow's group: " + yellowTeam);
+                }
+                else if (cmd.Contains("pink"))
+                {
+                    pinkTeam = cmd.Substring(cmd.LastIndexOf(" ") + 1);
+                    e.Player.SendSuccessMessage("Pink's group: " + pinkTeam);
+                }
+                else
+                {
+                    e.Player.SendInfoMessage("/teamset [team color] [group name]");
+                }
+                for (int i = 1; i < Groups.Length; i++)
+                    setting.WriteValue(informal[i], Groups[i]);
+                return;
+            }
+            var manage = TShock.Groups;
+            if (manage.GroupExists("default"))
+            {
+                manage.GetGroupByName("default").SetPermission(new System.Collections.Generic.List<string>() { "teamset.join" });
+                manage.GetGroupByName("default").ChatColor = "200,200,200";
+                manage.GetGroupByName("default").Prefix = "[i:1] ";
+            }
+            if (!manage.GroupExists("team"))
+            {
+                manage.AddGroup("team", "default", "", "255,255,255");
+                Console.WriteLine("The group 'team' has been made.");
+            }
+            for (int i = 1; i < Teams.Length; i++)
+            {
+                if (!TShock.Groups.GroupExists(Groups[i]))
+                {
+                    TShock.Groups.AddGroup(Groups[i], "team", "", "255,255,255");
+                    switch (i)
+                    {
+                        case 1:
+                            manage.GetGroupByName(Groups[i]).Prefix = "[i:1526] ";
+                            manage.GetGroupByName(Groups[i]).ChatColor = "200,000,000";
+                            break;
+                        case 2:
+                            manage.GetGroupByName(Groups[i]).Prefix = "[i:1525] ";
+                            manage.GetGroupByName(Groups[i]).ChatColor = "000,200,050";
+                            break;
+                        case 3:
+                            manage.GetGroupByName(Groups[i]).Prefix = "[i:1524] ";
+                            manage.GetGroupByName(Groups[i]).ChatColor = "100,100,200";
+                            break;
+                        case 4:
+                            manage.GetGroupByName(Groups[i]).Prefix = "[i:1523] ";
+                            manage.GetGroupByName(Groups[i]).ChatColor = "200,150,000";
+                            break;
+                        case 5:
+                            manage.GetGroupByName(Groups[i]).Prefix = "[i:1522] ";
+                            manage.GetGroupByName(Groups[i]).ChatColor = "200,000,150";
+                            break;
+                    }
+                    Console.WriteLine("The group '", Groups[i], "' has been made.");
+                }
+            }
+            string msg;
+            Console.WriteLine(msg = "The permissions, group colors, and chat prefixes have not been completely set up and will need to be done manually, though each team group has been parented to group 'team'.");
+            e.Player.SendSuccessMessage(msg);
         }
         private void PlaceTeam(CommandArgs e)
         {
@@ -160,6 +312,12 @@ namespace teamset
                                             if (SetPlayerTeam(name, t))
                                             {
                                                 e.Player.SendSuccessMessage(string.Concat(preserveCase, " is now on team ", Teams[t], "."));
+                                                string set = Groups[t].ToLower();
+                                                if (TShock.Groups.GroupExists(set))
+                                                {
+                                                    e.Player.Group = TShock.Groups.GetGroupByName(set);
+                                                    Console.WriteLine(string.Concat(e.Player.Name, " has been set to group ", set, "!"));
+                                                }
                                             }
                                             else
                                             {
@@ -185,6 +343,12 @@ namespace teamset
                     if (RemoveFromTeam(name = cmd.Substring(cmd.IndexOf(" ") + 1)))
                     {
                         e.Player.SendSuccessMessage(string.Concat(name, " has been removed from their team."));
+                        string set = "default";
+                        if (TShock.Groups.GroupExists(set))
+                        {
+                            e.Player.Group = TShock.Groups.GetGroupByName(set);
+                            Console.WriteLine(string.Concat(e.Player.Name, " has been set to group ", set, "!"));
+                        }
                     }
                     else
                     {
@@ -202,13 +366,14 @@ namespace teamset
             string cmd = string.Empty;
             int index = 0;
             bool success = false;
-            foreach (string t in Teams)
+            for (int i = 0; i < Teams.Length; i++)
             {
+                string t = Teams[i];
                 cmd = e.Message.Substring(9);
                 int.TryParse(cmd, out index);
-                if (GetPlayerTeam(e.Player.Name) == 0)
+                if (GetPlayerTeam(e.Player.Name) == 0 || freeJoin)
                 {
-                    if (cmd.ToLower() == t.ToLower())
+                    if (t.ToLower().Contains(cmd.ToLower()))
                         success = SetPlayerTeam(e.Player.Name, GetTeamIndex(cmd));
                     else if (index != 0 && index == GetTeamIndex(t))
                     {
@@ -217,13 +382,17 @@ namespace teamset
                     if (success)
                     {
                         e.Player.SendSuccessMessage(string.Concat("Joining ", t, " has succeeded."));
-                    }
-                    else
-                    {
-                        e.Player.SendErrorMessage(string.Concat(t, " might be full."));
+                        string set = Groups[i];
+                        if (TShock.Groups.GroupExists(set))
+                        {
+                            e.Player.Group = TShock.Groups.GetGroupByName(set);
+                            Console.WriteLine(string.Concat(e.Player.Name, " has been set to group ", set, "!"));
+                        }
+                        return;
                     }
                 }
             }
+            e.Player.SendErrorMessage(string.Concat("Chances are you are already on a team or this team's roster is full."));
         }
         private int GetTeamIndex(string team)
         {

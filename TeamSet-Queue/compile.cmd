@@ -1,0 +1,2 @@
+C:\Windows\Microsoft.NET\Framework\v4.0.30319\csc.exe /out:TeamSetQueue.dll /target:library /recurse:Plugin.cs /recurse:AssemblyInfo.cs /r:../dependencies/dotnet.dll /r:../dependencies/OTAPI.dll /r:../dependencies/Native.dll /r:../dependencies/TerrariaServer.exe /r:../dependencies/TShockAPI.dll
+pause
